@@ -1,0 +1,100 @@
+{
+  "title": "Framework Benchmark",
+  "uid": "bench-framework",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "tags": ["bench"],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "text": "Prometheus", "value": "Prometheus" },
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Throughput (k6 http_reqs)",
+      "id": 1,
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum(rate(k6_http_reqs_total[1m]))", "legendFormat": "RPS" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency p50/p95/p99/p99.9 (k6)",
+      "id": 2,
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "k6_http_req_duration_p50", "legendFormat": "p50" },
+        { "expr": "k6_http_req_duration_p95", "legendFormat": "p95" },
+        { "expr": "k6_http_req_duration_p99", "legendFormat": "p99" },
+        { "expr": "k6_http_req_duration_p99_9", "legendFormat": "p99.9" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "drawStyle": "line", "lineWidth": 2 }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "App CPU & memory (cAdvisor)",
+      "id": 3,
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum(rate(container_cpu_usage_seconds_total{name=\"bench-app\"}[1m]))", "legendFormat": "CPU" },
+        { "expr": "container_memory_rss{name=\"bench-app\"}", "legendFormat": "RSS" }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line" } }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "DB CPU & active connections",
+      "id": 4,
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum(rate(container_cpu_usage_seconds_total{name=\"bench-db\"}[1m]))", "legendFormat": "DB CPU" },
+        { "expr": "bench:db:active_connections", "legendFormat": "active conns" },
+        { "expr": "bench:db:tps:rate1m", "legendFormat": "rows/s" }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line" } }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Host pressure (PSI + steal time)",
+      "id": 5,
+      "gridPos": { "x": 0, "y": 16, "w": 24, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "bench:host:cpu_stealtime_p99:rate5s", "legendFormat": "steal p99" },
+        { "expr": "bench:host:psi_cpu_some_p99", "legendFormat": "psi cpu some p99" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "custom": { "drawStyle": "line" } }
+      }
+    }
+  ]
+}

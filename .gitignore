@@ -1,0 +1,75 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Local seed outputs
+bench/seed/out/
+/seed/
+
+# Go
+apps/**/bin/
+apps/**/vendor/
+apps/**/*.test
+apps/**/*.out
+apps/**/coverage.out
+apps/**/coverage.html
+apps/**/.cache/
+apps/go/bench-go
+
+# Rust (when added under apps/rust)
+apps/rust/target/
+apps/rust/Cargo.lock
+
+# Node (when added under apps/node)
+apps/node/node_modules/
+apps/node/dist/
+apps/node/.next/
+apps/node/coverage/
+
+# Python (apps/python and bench artifacts)
+apps/python/__pycache__/
+apps/python/**/__pycache__/
+apps/python/.venv/
+apps/python/venv/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+
+# Java (when added under apps/spring)
+apps/spring/target/
+apps/spring/.gradle/
+apps/spring/build/
+apps/spring/.idea/
+
+# .NET (when added under apps/aspnet)
+apps/aspnet/bin/
+apps/aspnet/obj/
+
+# Elixir (when added under apps/phoenix)
+apps/phoenix/_build/
+apps/phoenix/deps/
+apps/phoenix/cover/
+apps/phoenix/.elixir_ls/
+
+# Bun
+apps/bun/node_modules/
+apps/bun/dist/
+
+# Generic
+*.log
+*.tmp
+*.bak
+*.swp
+.DS_Store
+Thumbs.db
+
+# Docker / Compose
+**/Dockerfile.local
+
+# Runs
+runs/
+bench/seed/out/
+
+# Local worktrees
+.worktrees/

@@ -1,0 +1,89 @@
+# Prometheus configuration for the benchmark.
+#
+# Two scrape intervals are used:
+#   1s for the framework under test and the load generator
+#   5s for the database and the rest of the host
+#
+# The reason is storage: a ten-minute saturation run at 1s across all targets
+# is small, but at 1s for the entire stack (cAdvisor exposes thousands of
+# series per container) it adds up quickly. The 1s interval is reserved for
+# the measurements, and even those are dropped to 5s for the steady-state
+# background scrape.
+#
+# All targets are on the bench_telemetry network. Prometheus is *not* on
+# bench_edge or bench_data -- see docs/benchmark/testbed.md for why.
+
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+  # External labels are written into every remote_write target. They let a
+  # run manifest identify which time-series belong to which trial.
+  external_labels:
+    benchmark: modern-web-frameworks
+    cluster: bench
+
+# Recording rules for the headline numbers. The framework does not aggregate
+# these; k6 already reports p95/p99/p99.9 client-side, and the application
+# has its own per-endpoint metric endpoint. These rules are here so that
+# Grafana can plot host and database side without re-querying raw samples.
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  # ---------------------------------------------------------------------------
+  # Load generator (k6 exposes its own Prometheus endpoint when run with
+  # K6_PROMETHEUS_RW_SERVER_URL). The /metrics path is on the host:5660 of
+  # the k6 container.
+  # ---------------------------------------------------------------------------
+  - job_name: k6
+    scrape_interval: 1s
+    static_configs:
+      - targets: [loadgen:5660]
+        labels:
+          role: loadgen
+
+  # ---------------------------------------------------------------------------
+  # Application under test. Every framework ships a /metrics endpoint
+  # (contracts/openapi.yaml). The endpoint path is fixed.
+  # ---------------------------------------------------------------------------
+  - job_name: app
+    scrape_interval: 1s
+    metrics_path: /metrics
+    static_configs:
+      - targets: [app:8080]
+        labels:
+          role: app
+
+  # ---------------------------------------------------------------------------
+  # Postgres exporter
+  # ---------------------------------------------------------------------------
+  - job_name: postgres
+    static_configs:
+      - targets: [postgres-exporter:9187]
+        labels:
+          role: db
+
+  # ---------------------------------------------------------------------------
+  # cAdvisor (per-container resource usage)
+  # ---------------------------------------------------------------------------
+  - job_name: cadvisor
+    static_configs:
+      - targets: [cadvisor:8080]
+        labels:
+          role: telemetry
+
+  # ---------------------------------------------------------------------------
+  # node_exporter (host-wide: CPU, memory, network, pressure-stall, etc.)
+  # ---------------------------------------------------------------------------
+  - job_name: node
+    static_configs:
+      - targets: [node-exporter:9100]
+        labels:
+          role: host
+
+  # ---------------------------------------------------------------------------
+  # Prometheus self-scrape. Sanity check that the scraper is alive.
+  # ---------------------------------------------------------------------------
+  - job_name: prometheus
+    static_configs:
+      - targets: [localhost:9090]

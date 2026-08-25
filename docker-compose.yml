@@ -1,0 +1,303 @@
+# Benchmark testbed topology.
+#
+# Every service is behind a profile so that a single Compose file can describe
+# both the single-host development layout and the distributed measurement
+# layout (one `docker compose --profile <role>` invocation per node).
+#
+# See docs/benchmark/testbed.md for the network rationale and
+# docs/benchmark/resources.md for the resource-boundary rationale.
+
+x-logging: &bench-logging
+  # Logging is a measured cost, not a free service. json-file with a hard cap
+  # keeps disk pressure out of the results; the framework itself is configured
+  # to emit WARN and above so that log volume is comparable across candidates.
+  driver: json-file
+  options:
+    max-size: "16m"
+    max-file: "3"
+
+x-app-limits: &app-limits
+  cpuset: ${APP_CPUSET:-2-5}
+  cpus: ${APP_CPUS:-4}
+  mem_limit: ${APP_MEMORY:-4g}
+  # Swapping under memory pressure would show up as latency attributable to the
+  # framework. Disallow it so an over-limit container fails loudly instead.
+  memswap_limit: ${APP_MEMORY:-4g}
+  oom_kill_disable: false
+
+services:
+  # ---------------------------------------------------------------------------
+  # Database node
+  # ---------------------------------------------------------------------------
+  db:
+    profiles: ["db", "single"]
+    image: postgres:${POSTGRES_VERSION:-16}
+    container_name: bench-db
+    # Override the entrypoint so we can wait for the seeder before initdb
+    # runs. The wrapper hands off to the original entrypoint after the CSVs
+    # are in place.
+    entrypoint: ["/usr/local/bin/wait-seed.sh"]
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-bench}
+      POSTGRES_USER: ${POSTGRES_USER:-bench}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    volumes:
+      - ./infra/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./infra/postgres/wait-seed.sh:/usr/local/bin/wait-seed.sh:ro
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+      - seed-out:/seed:ro
+      - db-data:/var/lib/postgresql/data
+    ports:
+      # Bound to loopback: the benchmark network is private, and the port is
+      # published only so the seed verifier and psql can reach it locally.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    cpuset: ${DB_CPUSET:-8-15}
+    cpus: ${DB_CPUS:-8}
+    mem_limit: ${DB_MEMORY:-16g}
+    memswap_limit: ${DB_MEMORY:-16g}
+    shm_size: 1g
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bench} -d ${POSTGRES_DB:-bench}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    networks:
+      bench_data:
+      bench_telemetry:
+    logging: *bench-logging
+
+  # ---------------------------------------------------------------------------
+  # Seeder. Runs once per fresh database volume. Produces the CSV files the
+  # init scripts COPY, then exits. Stays in the same profile as `db` so the
+  # default single-host layout includes it; for a distributed layout, run it
+  # before the database starts (it has no networking needs and is cheap to
+  # re-run).
+  # ---------------------------------------------------------------------------
+  seeder:
+    profiles: ["db", "single"]
+    image: python:3.12-slim
+    container_name: bench-seeder
+    working_dir: /work
+    environment:
+      SEED_PRODUCTS: ${SEED_PRODUCTS:-100000}
+      SEED_CUSTOMERS: ${SEED_CUSTOMERS:-50000}
+      SEED_ORDERS: ${SEED_ORDERS:-250000}
+    command: ["python", "/work/seed.py", "/seed-out", "-"]
+    volumes:
+      - ./bench/seed:/work:ro
+      - seed-out:/seed-out
+    cpuset: ${TELEMETRY_CPUSET:-0-1}
+    cpus: 1
+    mem_limit: 1g
+    networks: []
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # Application under test
+  #
+  # APP_IMAGE is set by bench/scripts/run-trial.sh from the framework registry
+  # in bench/frameworks.yaml. Exactly one framework runs at a time.
+  # ---------------------------------------------------------------------------
+  app:
+    profiles: ["app", "single"]
+    image: ${APP_IMAGE:?APP_IMAGE must be set - use bench/scripts/run-trial.sh}
+    container_name: bench-app
+    environment:
+      # Every framework reads the same variables. The contract is documented in
+      # docs/benchmark/app-contract.md.
+      DATABASE_URL: postgres://${POSTGRES_USER:-bench}:${POSTGRES_PASSWORD:?}@${BENCH_DB_HOST:-db}:5432/${POSTGRES_DB:-bench}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-32}
+      PORT: "8080"
+      LOG_LEVEL: ${APP_LOG_LEVEL:-warn}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    <<: *app-limits
+    stop_grace_period: 10s
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+    networks:
+      bench_edge:
+      bench_data:
+      bench_telemetry:
+    logging: *bench-logging
+
+  # ---------------------------------------------------------------------------
+  # Load generator
+  # ---------------------------------------------------------------------------
+  loadgen:
+    profiles: ["loadgen", "single"]
+    image: grafana/k6:0.50.0
+    container_name: bench-load
+    # k6 itself runs as uid 12345 in the upstream image. The /runs
+    # named volume is created root-owned and k6 cannot write to it
+    # without an explicit chown; doing that chown in the entrypoint
+    # would also need root, so the simpler answer is to run the
+    # container as root. This is an internal loadgen, not a hostile
+    # code surface.
+    user: "0:0"
+    # The k6 image's default entrypoint is `k6`. Override to a shell
+    # so we can run our chown wrapper. The wrapper execs whatever
+    # command the operator passed; the long-running default is
+    # `sleep infinity`, but `docker exec bench-load k6 run ...`
+    # replaces the process for the duration of the exec.
+    entrypoint: ["/bin/sh", "/usr/local/bin/loadgen-entrypoint.sh"]
+    command: ["sleep", "infinity"]
+    environment:
+      TARGET_BASE_URL: http://${BENCH_APP_HOST:-app}:8080
+    volumes:
+      - ./bench/k6:/scripts:ro
+      - ./infra/observability/loadgen-entrypoint.sh:/usr/local/bin/loadgen-entrypoint.sh:ro
+      # /runs is a named volume so the k6 process (uid 12345 inside
+      # the image) can write to it without host bind-mount permission
+      # surprises. The trial driver copies the artifacts out to the
+      # host filesystem at trial end.
+      - loadgen-runs:/runs
+    cpuset: ${LOADGEN_CPUSET:-2-9}
+    cpus: ${LOADGEN_CPUS:-8}
+    mem_limit: ${LOADGEN_MEMORY:-8g}
+    networks:
+      bench_edge:
+      bench_telemetry:
+    logging: *bench-logging
+
+  # ---------------------------------------------------------------------------
+  # Telemetry (co-located with db; see docs/benchmark/testbed.md)
+  # ---------------------------------------------------------------------------
+  prometheus:
+    profiles: ["telemetry", "single"]
+    image: prom/prometheus:v2.53.0
+    container_name: bench-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # A ten-minute saturation run at a 1s scrape interval is small; keeping
+      # 30 days lets several runs be compared without re-exporting.
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+    volumes:
+      - ./infra/observability/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      bench_telemetry:
+    logging: *bench-logging
+
+  grafana:
+    profiles: ["telemetry", "single"]
+    image: grafana/grafana:11.1.0
+    container_name: bench-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      # Loopback only. Grafana has no authenticated exposure requirement here;
+      # reach it through an SSH tunnel.
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - prometheus
+    networks:
+      bench_telemetry:
+    logging: *bench-logging
+
+  node-exporter:
+    profiles: ["telemetry", "app", "db", "loadgen", "single"]
+    image: prom/node-exporter:v1.8.1
+    container_name: bench-node-exporter
+    command:
+      - --path.rootfs=/host
+      - --collector.cpu.info
+      - --collector.processes
+      # Steal time and pressure-stall information are the two signals that
+      # reveal a testbed that is not actually isolated.
+      - --collector.pressure
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    # The exporter is deliberately pinned away from the measured cores so its
+    # own sampling cost cannot appear in the application's CPU accounting.
+    cpuset: ${TELEMETRY_CPUSET:-0-1}
+    mem_limit: 256m
+    networks:
+      bench_telemetry:
+    logging: *bench-logging
+
+  cadvisor:
+    profiles: ["telemetry", "app", "single"]
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: bench-cadvisor
+    command:
+      - --housekeeping_interval=1s
+      - --docker_only=true
+      # Disable the metric families the benchmark does not read; cAdvisor's
+      # default set is expensive enough to perturb a saturated host.
+      - --disable_metrics=percpu,sched,tcp,udp,advtcp,process,hugetlb,referenced_memory,cpu_topology,resctrl
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+    devices:
+      - /dev/kmsg
+    privileged: true
+    cpuset: ${TELEMETRY_CPUSET:-0-1}
+    mem_limit: 512m
+    networks:
+      bench_telemetry:
+    logging: *bench-logging
+
+  postgres-exporter:
+    profiles: ["telemetry", "db", "single"]
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: bench-postgres-exporter
+    environment:
+      DATA_SOURCE_NAME: postgresql://${POSTGRES_USER:-bench}:${POSTGRES_PASSWORD:?}@${BENCH_DB_HOST:-db}:5432/${POSTGRES_DB:-bench}?sslmode=disable
+    cpuset: ${TELEMETRY_CPUSET:-0-1}
+    mem_limit: 256m
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      bench_data:
+      bench_telemetry:
+    logging: *bench-logging
+
+networks:
+  # Benchmark request traffic only.
+  bench_edge:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: ${BENCH_MTU:-1500}
+  # SQL only.
+  bench_data:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: ${BENCH_MTU:-1500}
+  # Scrape traffic only, so it never shares a bridge with a measured path.
+  bench_telemetry:
+    driver: bridge
+
+volumes:
+  db-data:
+  prometheus-data:
+  grafana-data:
+  seed-out:
+  loadgen-runs:

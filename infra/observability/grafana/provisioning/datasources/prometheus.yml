@@ -1,0 +1,16 @@
+# Auto-provision the Prometheus datasource so the dashboards light up without
+# manual configuration. Loopback-only access to Grafana is enforced by the
+# docker-compose port binding; this file is not a security boundary.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 1s
+      httpMethod: POST

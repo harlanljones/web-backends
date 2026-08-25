@@ -1,0 +1,26 @@
+# Framework registry.
+#
+# The trial driver reads this file to know what to run. The shape is a
+# YAML document, one entry per framework, with the build target, the
+# start command, and the env-file contract.
+#
+# Adding a new framework is a one-line addition here, plus the framework
+# directory under apps/ that builds the listed image.
+
+frameworks:
+  - name: go
+    image: bench/go:latest
+    dockerfile: apps/go/Dockerfile
+    # The contract is the same for every framework; the entrypoint is the
+    # binary. Frameworks that need a shell wrapper can list it here.
+    entrypoint: ["/usr/local/bin/bench-go"]
+    # Per-framework extra env, layered on top of the trial's env. Most
+    # frameworks will not need this; the file is here for the GoAMQP /
+    # Spring-Boot-style "set this to enable that" cases.
+    env: {}
+    # Workloads this framework implements. The conformance runner uses
+    # this to know which endpoints to test. "all" means every contract
+    # endpoint. The list form lets an experimental framework opt into
+    # only the read workload, say, without failing conformance for the
+    # other three.
+    workloads: all

@@ -1,0 +1,227 @@
+openapi: 3.1.0
+info:
+  title: Benchmark API
+  version: "1.0.0"
+  description: |
+    HTTP contract implemented by every framework under test.
+
+    Four workloads plus a health endpoint and a metrics endpoint. The
+    workload endpoints are the unit of measurement; the others are required
+    for the testbed to function.
+
+servers:
+  - url: http://app:8080
+    description: Container hostname on bench_edge.
+
+paths:
+  /json:
+    get:
+      operationId: getJson
+      summary: I/O-free JSON serialization
+      description: |
+        Returns a small static JSON body. No database access. This endpoint
+        is the framework's serialization floor: a number that the framework
+        cannot go below no matter what its database is doing.
+      responses:
+        "200":
+          description: Static JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonResponse"
+              example:
+                service: "bench"
+                version: "1.0.0"
+                time: "2026-08-25T00:00:00Z"
+
+  /products/{id}:
+    get:
+      operationId: getProduct
+      summary: Indexed single-record read
+      description: |
+        Looks up a product by primary key. The path-parameter value is the
+        actual id; the framework must not parse it as anything else.
+
+        Returns 404 for unknown ids. Returning 200 with an empty body is
+        *not* conformant; the contract is that a missing record is a
+        distinct outcome from a present one.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1, maximum: 1000000 }
+      responses:
+        "200":
+          description: Product found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+        "404":
+          description: No such product.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /orders:
+    post:
+      operationId: createOrder
+      summary: Transactional multi-table write
+      description: |
+        Creates an order with one or more line items in a single transaction.
+        Writes to `orders`, `order_items`, and `inventory_ledger`. Decrements
+        `products.stock` by the same amount.
+
+        Idempotency: the `Idempotency-Key` header is required. A repeated
+        POST with the same key returns the original 201 with the original
+        order id; the framework must not create a duplicate row.
+
+        Concurrency: two requests with different `Idempotency-Key` values
+        for the same customer and product are racy. The framework must use
+        `SELECT ... FOR UPDATE` on the affected products inside the
+        transaction so the stock decrement is atomic.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrderRequest" }
+      responses:
+        "201":
+          description: Order created (or replayed from a prior request with the same key).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+        "400":
+          description: Validation failure.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Insufficient stock for one or more line items.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /dashboard:
+    get:
+      operationId: getDashboard
+      summary: Compute and server-side render
+      description: |
+        Aggregates the last 30 days of orders and renders an HTML page. The
+        page contains a single table with one row per category: order count
+        and total revenue. The body is non-empty HTML even when there is
+        nothing to render.
+
+        A framework that returns JSON here is *not* conformant. The contract
+        is HTML because the rendering cost is the part we want to measure.
+      parameters:
+        - name: days
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 365, default: 30 }
+      responses:
+        "200":
+          description: HTML dashboard.
+          content:
+            text/html:
+              schema: { type: string }
+
+  /health:
+    get:
+      operationId: getHealth
+      summary: Liveness check
+      description: |
+        Returns 200 with a single-line JSON body when the process is ready to
+        accept traffic. Must not require a database round trip; the Compose
+        healthcheck fires before the database may be ready.
+      responses:
+        "200":
+          description: Ready.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, enum: [ok] }
+
+  /metrics:
+    get:
+      operationId: getMetrics
+      summary: Prometheus metrics
+      description: Standard Prometheus text format. See docs/benchmark/app-contract.md.
+      responses:
+        "200":
+          description: Metrics.
+          content:
+            text/plain:
+              schema: { type: string }
+
+components:
+  schemas:
+    JsonResponse:
+      type: object
+      required: [service, version, time]
+      properties:
+        service: { type: string }
+        version: { type: string }
+        time:   { type: string, format: date-time }
+
+    Product:
+      type: object
+      required: [id, sku, name, description, category_id, price_cents, stock, active]
+      properties:
+        id:          { type: integer }
+        sku:         { type: string }
+        name:        { type: string }
+        description: { type: string }
+        category_id: { type: integer }
+        price_cents: { type: integer }
+        stock:       { type: integer }
+        active:      { type: boolean }
+
+    OrderRequest:
+      type: object
+      required: [customer_id, items]
+      properties:
+        customer_id: { type: integer, minimum: 1 }
+        items:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            type: object
+            required: [product_id, quantity]
+            properties:
+              product_id: { type: integer, minimum: 1 }
+              quantity:   { type: integer, minimum: 1, maximum: 1000 }
+
+    Order:
+      type: object
+      required: [id, customer_id, status, total_cents, items]
+      properties:
+        id:          { type: integer }
+        customer_id: { type: integer }
+        status:      { type: string, enum: [pending, paid, shipped, cancelled] }
+        total_cents: { type: integer }
+        items:
+          type: array
+          items:
+            type: object
+            required: [product_id, quantity, unit_price_cents]
+            properties:
+              product_id:       { type: integer }
+              quantity:         { type: integer }
+              unit_price_cents: { type: integer }
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        details:
+          type: object
+          additionalProperties: true
