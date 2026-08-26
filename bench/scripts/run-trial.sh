@@ -25,7 +25,9 @@ import yaml, sys
 data = yaml.safe_load(open('$ROOT/bench/frameworks.yaml'))
 for f in data.get('frameworks', []):
     print(f'{f[\"name\"]:12s} {f[\"image\"]:32s} workloads={f[\"workloads\"]}')" 2>/dev/null || \
-    awk '/^ *- name:/ { name=$3 } /^ *image:/ { image=$2 } { print name, image }' "$ROOT/bench/frameworks.yaml"
+    awk '/^[ \t]*- name:/ { if(name && image) print name, image; name=$3; image="" }
+         /^[ \t]*image:/ { image=$2 }
+         END { if(name && image) print name, image }' "$ROOT/bench/frameworks.yaml"
     exit 0
     ;;
 esac
@@ -50,8 +52,8 @@ done
 # Resolve the framework entry. A simple grep-based parser because the file is
 # 30 lines and the real parser is the conformance runner's job.
 # ---------------------------------------------------------------------------
-SECTION=$(awk "/^ *- name: ${FRAMEWORK}\$/,/^ *- name: /" "$ROOT/bench/frameworks.yaml" \
-  | sed '/^ *- name: /!b' | head -1)
+SECTION=$(awk "/^[[:space:]]*- name: ${FRAMEWORK}\$/,/^[[:space:]]*- name: /" "$ROOT/bench/frameworks.yaml" \
+  | sed '/^[[:space:]]*- name: /!b' | head -1)
 if [ -z "$SECTION" ]; then
   echo "framework '$FRAMEWORK' is not registered in bench/frameworks.yaml" >&2
   echo "registered:" >&2
@@ -60,17 +62,17 @@ if [ -z "$SECTION" ]; then
 fi
 
 IMAGE=$(awk -v fw="$FRAMEWORK" '
-  $0 ~ "^- name: " fw "$" {found=1}
-  found && /^ *image:/ {gsub(/"/,"",$2); print $2; exit}
+  $0 ~ "^[ \t]*- name: " fw "[ \t]*$" {found=1; next}
+  found && /image:/ {gsub(/"/,"",$2); print $2; exit}
 ' "$ROOT/bench/frameworks.yaml")
 DOCKERFILE=$(awk -v fw="$FRAMEWORK" '
-  $0 ~ "^- name: " fw "$" {found=1}
-  found && /^ *dockerfile:/ {gsub(/"/,"",$2); print $2; exit}
+  $0 ~ "^[ \t]*- name: " fw "[ \t]*$" {found=1; next}
+  found && /dockerfile:/ {gsub(/"/,"",$2); print $2; exit}
 ' "$ROOT/bench/frameworks.yaml")
 ENTRYPOINT=$(awk -v fw="$FRAMEWORK" '
-  $0 ~ "^- name: " fw "$" {found=1}
-  found && /^ *entrypoint:/ {found=0; print}
-' "$ROOT/bench/frameworks.yaml" | head -1)
+  $0 ~ "^[ \t]*- name: " fw "[ \t]*$" {found=1; next}
+  found && /entrypoint:/ {print; exit}
+' "$ROOT/bench/frameworks.yaml" | sed -E 's/^[[:space:]]*entrypoint:[[:space:]]*//; s/[[:space:]]*$//')
 
 echo "framework: $FRAMEWORK"
 echo "image:     $IMAGE"
@@ -167,19 +169,14 @@ docker exec bench-db psql -U "${POSTGRES_USER:-bench}" -d "${POSTGRES_DB:-bench}
 echo
 echo "trial ready: $IMAGE is up at http://127.0.0.1:${APP_PORT:-8080}"
 echo
-echo "Run the k6 protocol (in another terminal):"
-echo "  # warm-up"
+echo "Run the k6 protocol:"
+echo "  # full three-phase trial with per-phase archival into runs/<trial>/"
+echo "  bench/scripts/exec-trial.sh <trial-id>"
+echo
+echo "  # or one phase at a time, in another terminal"
 echo "  docker exec bench-load k6 run /scripts/warmup.js"
-echo "  # ramp"
 echo "  docker exec bench-load k6 run /scripts/ramp.js"
-echo "  # measurement (10 min at TARGET_RPS = \${TARGET_RPS:-10000})"
 echo "  docker exec bench-load k6 run /scripts/saturation.js"
-echo
-echo "Or in one shot (development only):"
-echo "  docker exec bench-load k6 run /scripts/trial.js"
-echo
-echo "When done, copy the artifacts out:"
-echo "  bench/scripts/collect-runs.sh <trial-id>"
 echo
 echo "See bench/k6/README.md for the protocol and env variables."
 echo

@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    name: Syntax + config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell syntax
+        run: |
+          set -e
+          for s in bench/scripts/*.sh; do bash -n "$s"; done
+          echo "shell scripts OK"
+
+      - name: Python compile
+        run: |
+          python3 -m py_compile \
+            bench/analysis/aggregate.py \
+            bench/analysis/compare.py \
+            bench/analysis/report.py \
+            bench/seed/seed.py \
+            bench/conformance/run.py
+          echo "python OK"
+
+      - name: YAML validity (compose + framework registry + meta)
+        run: |
+          set -e
+          # Compose config validation (requires .env.example for interpolation).
+          APP_IMAGE=bench/go:latest docker compose \
+            --env-file .env.example -f docker-compose.yml config --quiet
+          # PyYAML presence is optional; validate with a structural check
+          # that doesn't require a top-level list assumption.
+          python3 - <<'PY'
+          try:
+            import yaml
+          except ImportError:
+            print("PyYAML not installed; skipping YAML structural check")
+            raise SystemExit(0)
+          for p in ("bench/frameworks.yaml", "bench/analysis/meta/frameworks.yaml"):
+            with open(p) as f:
+              yaml.safe_load(f)
+            print(f"OK {p}")
+          PY
+
+  frameworks:
+    name: Framework registry is consistent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every apps/<fw> has a Dockerfile + README and is registered
+        run: |
+          set -e
+          for slot in go rust node bun python spring aspnet phoenix; do
+            test -f "apps/$slot/Dockerfile" || { echo "missing apps/$slot/Dockerfile"; exit 1; }
+            test -f "apps/$slot/README.md" || { echo "missing apps/$slot/README.md"; exit 1; }
+          done
+          # Each registered framework maps to an existing apps/ dir.
+          awk '/^[[:space:]]*- name:/ { gsub(/\"/, ""); print $3 }' bench/frameworks.yaml | while read -r name; do
+            test -d "apps/$name" || { echo "registered '$name' has no apps/$name"; exit 1; }
+          done
+          echo "framework registry OK"

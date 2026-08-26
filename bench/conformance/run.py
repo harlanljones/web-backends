@@ -133,7 +133,9 @@ def test_dashboard(base: str) -> Test:
     def validate(status: int, body: bytes, hdr: dict[str, str]) -> None:
         if status != 200:
             raise AssertionError(f"status {status}, want 200")
-        ct = hdr.get("Content-Type", "")
+        # urllib's dict(response.headers) lowercases header names, so
+        # look up case-insensitively rather than assuming "Content-Type".
+        ct = next((v for k, v in hdr.items() if k.lower() == "content-type"), "")
         if "text/html" not in ct:
             raise AssertionError(f"Content-Type was {ct!r}, expected text/html")
         text = body.decode("utf-8", errors="replace")

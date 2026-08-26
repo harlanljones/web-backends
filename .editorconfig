@@ -1,0 +1,29 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Python conforms to PEP 8.
+[*.py]
+indent_size = 4
+
+# Go uses tabs (gofmt).
+[*.go]
+indent_style = tab
+
+# Makefiles and shell must use tabs for indentation.
+[Makefile]
+indent_style = tab
+
+[*.sh]
+indent_style = space
+indent_size = 2
+
+# Markdown default.
+[*.md]
+trim_trailing_whitespace = false

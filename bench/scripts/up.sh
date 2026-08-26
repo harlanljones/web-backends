@@ -40,6 +40,16 @@ set -a; . "$ROOT/.env"; set +a
 
 compose() { docker compose --env-file "$ROOT/.env" "$@"; }
 
+# Compose interpolates APP_IMAGE at `config` time even when the app
+# profile is not selected, and the compose file declares it as required
+# (`:?`). Export a placeholder so `up.sh` can bring up the testbed
+# (db/telemetry/loadgen) without naming a framework. A real APP_IMAGE,
+# when set, overrides this and starts the app too. We remember the
+# caller's intent so we only start the app when they named one.
+HAS_APP=0
+if [ -n "${APP_IMAGE:-}" ]; then HAS_APP=1; fi
+export APP_IMAGE="${APP_IMAGE:-bench/none:latest}"
+
 if [ -n "$ROLE" ]; then
   compose --profile "$ROLE" up -d
   exit $?
@@ -48,9 +58,9 @@ fi
 case "$MODE" in
   single)
     # `single` brings up every profile on one host. The application is skipped
-    # unless APP_IMAGE is set, because there is no default framework: a trial
-    # always names the one it is measuring.
-    if [ "$WITH_APP" = 1 ] && [ -n "${APP_IMAGE:-}" ]; then
+    # unless the caller named an APP_IMAGE, because there is no default
+    # framework: a trial always names the one it is measuring.
+    if [ "$WITH_APP" = 1 ] && [ "$HAS_APP" = 1 ]; then
       compose --profile single up -d
     else
       compose --profile db --profile telemetry --profile loadgen up -d

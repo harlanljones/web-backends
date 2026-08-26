@@ -1,0 +1,9 @@
+# Build / runtime noise that must not land in the docker build context.
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.log
+.env

@@ -1,0 +1,20 @@
+[project]
+name = "bench-python"
+version = "1.0.0"
+description = "FastAPI reference implementation of the benchmark contract"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "asyncpg",
+    "prometheus-client",
+]
+
+[dependency-groups]
+dev = []
+
+[tool.uv]
+# The app is run from the source tree (main.py), not installed as a package,
+# so uv sync only needs to provision the dependencies into the venv.
+package = false

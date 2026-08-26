@@ -24,3 +24,47 @@ frameworks:
     # only the read workload, say, without failing conformance for the
     # other three.
     workloads: all
+  - name: rust
+    image: bench/rust:latest
+    dockerfile: apps/rust/Dockerfile
+    entrypoint: ["/usr/local/bin/bench-axum"]
+    env: {}
+    workloads: all
+  - name: node
+    image: bench/node:latest
+    dockerfile: apps/node/Dockerfile
+    entrypoint: ["node", "src/index.js"]
+    env: {}
+    workloads: all
+  - name: bun
+    image: bench/bun:latest
+    dockerfile: apps/bun/Dockerfile
+    # The bun image uses a file-based ENTRYPOINT with CMD; the effective
+    # command is `bun run src/index.ts`.
+    entrypoint: ["bun", "run", "src/index.ts"]
+    env: {}
+    workloads: all
+  - name: python
+    image: bench/python:latest
+    dockerfile: apps/python/Dockerfile
+    entrypoint: ["/app/.venv/bin/python", "/app/main.py"]
+    env: {}
+    workloads: all
+  - name: spring
+    image: bench/spring:latest
+    dockerfile: apps/spring/Dockerfile
+    entrypoint: ["java", "-jar", "/app/app.jar"]
+    env: {}
+    workloads: all
+  - name: aspnet
+    image: bench/aspnet:latest
+    dockerfile: apps/aspnet/Dockerfile
+    entrypoint: ["dotnet", "/app/publish/Bench.dll"]
+    env: {}
+    workloads: all
+  - name: phoenix
+    image: bench/phoenix:latest
+    dockerfile: apps/phoenix/Dockerfile
+    entrypoint: ["/app/bench"]
+    env: {}
+    workloads: all

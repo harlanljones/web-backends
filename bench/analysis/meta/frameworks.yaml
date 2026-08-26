@@ -1,0 +1,85 @@
+# Qualitative framework context for the decision matrix.
+#
+# This file holds the dimensions the benchmark CANNOT measure: ecosystem
+# friction, concurrency model, and language ergonomics. These are
+# editorial observations, not benchmark results. The measured numerical
+# dimensions (throughput, tail latency, memory, CPU, concurrency
+# behavior) come from bench/analysis/aggregate.py and are merged in by
+# bench/analysis/compare.py.
+#
+# Every key here is qualitative and must be read as "what a team should
+# expect to invest based on the ecosystem and language", not as a
+# measured quantity. The benchmark report distinguishes these from the
+# measured results explicitly.
+#
+# Keys:
+#   concurrency_model  how the runtime schedules concurrent work
+#   ecosystem_friction rating 1-5 (5 = most friction): hiring, libs,
+#                      maturity of async/DB drivers, ecosystem churn
+#   team_scaling       how the framework's model fares as a team grows
+#   notes              free-text nuance not captured by the ratings
+
+frameworks:
+  go:
+    language: Go
+    name: "Go + Gin"
+    concurrency_model: "Goroutines with a preemptive scheduler; goroutine-per-request is idiomatic"
+    ecosystem_friction: 2
+    team_scaling: "Seamless: small binaries, fast builds, strong standard library; the Go team's opinionated tooling (gofmt, vet, module) removes most bikeshedding."
+    notes: "pgx is a first-class async-agnostic driver; the pool is the throughput lever. Minimal runtime overhead makes it a safe default."
+
+  rust:
+    language: Rust
+    name: "Axum (Rust/Tokio)"
+    concurrency_model: "Async with a multi-threaded Tokio reactor; tasks are cheap but ownership/borrow rules are the cost"
+    ecosystem_friction: 4
+    team_scaling: "Borrow-checker and async-trait friction raise the onboarding curve; a small senior team can go very fast, a growing one pays a steeper tax."
+    notes: "Speed plus memory safety, but the async ecosystem is evolving quickly (tower, axum versions). Compile times and generics are the main friction."
+
+  node:
+    language: JavaScript/TypeScript
+    name: "Fastify (Node.js)"
+    concurrency_model: "Single-threaded event loop; of the eight runtimes it is the only one that cannot use more than one core without clustering/worker_threads"
+    ecosystem_friction: 2
+    team_scaling: "Huge hiring pool and package ecosystem; the single-threaded model means team-scale throughput is a cluster-topology problem, not a framework one."
+    notes: "Fastify is the fastest mainstream Node data path; the event loop is the ceiling. TypeScript adds safety but also friction."
+
+  spring:
+    language: Java
+    name: "Spring Boot 3 + Loom (Java 21)"
+    concurrency_model: "Project Loom virtual threads on the JIT; the JIT warms up, so the measured latency is a cold-vs-hot question"
+    ecosystem_friction: 3
+    team_scaling: "Deep enterprise ecosystem and massive hiring pool; Loom changes the concurrency model but Spring adds startup time and memory that the framework comparison must capture."
+    notes: "First-trial cold start is a real effect; Loom makes blocking JDBC cheap but the framework's DI/reflection overhead is measured, not assumed."
+
+  aspnet:
+    language: C#/.NET
+    name: "ASP.NET Core"
+    concurrency_model: "Task-based async on a thread pool; Kestrel and the shared-framework model"
+    ecosystem_friction: 2
+    team_scaling: "Strong tooling, a single vendor platform, and a large hiring pool; the platform's AOT option trades startup time for deployment complexity."
+    notes: "The platform's maturity and the JIT/AOT choice are the two levers; the framework is rarely the bottleneck in a .NET shop."
+
+  python:
+    language: Python
+    name: "FastAPI (ASGI / uvicorn / uvloop)"
+    concurrency_model: "Async on the uvloop event loop, single-threaded for async; CPU-bound work needs worker processes"
+    ecosystem_friction: 2
+    team_scaling: "A very large hiring pool and the richest scientific/ML ecosystem; the GIL and the CPython interpreter are the ceiling, not the framework."
+    notes: "FastAPI's async data path is fast, but Python is the slowest runtime here; the benchmark measures whether that is acceptable for the workload."
+
+  phoenix:
+    language: Elixir
+    name: "Phoenix (Elixir/BEAM)"
+    concurrency_model: "BEAM actor model with preemptive scheduling and per-process heap isolation; the only one designed for massive fan-in and stateful processes"
+    ecosystem_friction: 3
+    team_scaling: "Excellent for stateful, high-connection workloads; a smaller hiring pool and an unusual (functional) model make team scaling steeper than the runtime's throughput suggests."
+    notes: "The actor model shines for per-connection state; the question is whether the workload needs it and whether the team can hire for it."
+
+  bun:
+    language: TypeScript (Bun)
+    name: "Hono (Bun)"
+    concurrency_model: "Bun is a WebKit-based single-process runtime; Hono is a web-standard (fetch-based) router with a small surface"
+    ecosystem_friction: 3
+    team_scaling: "A JS API on a fast native runtime; Bun is new and its ecosystem/features are still maturing, so the hiring pool for Bun-specific knowledge is small even though TS knowledge carries over."
+    notes: "Web-standard APIs (Request/Response) make it portable to other runtimes; the friction is Bun's own maturity rather than Hono's."

@@ -1,4 +1,4 @@
-# Environment
+# Environment / secrets
 .env
 .env.*
 !.env.example
@@ -7,7 +7,11 @@
 bench/seed/out/
 /seed/
 
+# Benchmark runs (raw trial artifacts)
+/runs/
+
 # Go
+apps/go/go
 apps/**/bin/
 apps/**/vendor/
 apps/**/*.test
@@ -15,19 +19,17 @@ apps/**/*.out
 apps/**/coverage.out
 apps/**/coverage.html
 apps/**/.cache/
-apps/go/bench-go
 
-# Rust (when added under apps/rust)
+# Rust
+# Cargo.lock is committed so the benchmark builds reproducibly.
 apps/rust/target/
-apps/rust/Cargo.lock
 
-# Node (when added under apps/node)
+# Node
 apps/node/node_modules/
 apps/node/dist/
-apps/node/.next/
 apps/node/coverage/
 
-# Python (apps/python and bench artifacts)
+# Python
 apps/python/__pycache__/
 apps/python/**/__pycache__/
 apps/python/.venv/
@@ -36,40 +38,36 @@ apps/python/venv/
 **/*.pyc
 .pytest_cache/
 
-# Java (when added under apps/spring)
+# Java / Spring
 apps/spring/target/
 apps/spring/.gradle/
 apps/spring/build/
 apps/spring/.idea/
+apps/spring/.mvn/
 
-# .NET (when added under apps/aspnet)
+# .NET / ASP.NET
 apps/aspnet/bin/
 apps/aspnet/obj/
 
-# Elixir (when added under apps/phoenix)
+# Elixir / Phoenix
 apps/phoenix/_build/
 apps/phoenix/deps/
 apps/phoenix/cover/
 apps/phoenix/.elixir_ls/
+apps/phoenix/erl_crash.dump
 
 # Bun
 apps/bun/node_modules/
 apps/bun/dist/
 
-# Generic
+# Generic build / editor noise
 *.log
 *.tmp
 *.bak
 *.swp
 .DS_Store
 Thumbs.db
+*.class
 
-# Docker / Compose
+# Docker / Compose local overrides
 **/Dockerfile.local
-
-# Runs
-runs/
-bench/seed/out/
-
-# Local worktrees
-.worktrees/

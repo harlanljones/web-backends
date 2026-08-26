@@ -184,6 +184,13 @@ services:
       # 30 days lets several runs be compared without re-exporting.
       - --storage.tsdb.retention.time=30d
       - --web.enable-lifecycle
+      # Accept remote-write so the load generator CAN push k6 client-side
+      # metrics (RPS, latency percentiles) into the same TSDB the app and
+      # host metrics land in. The stock k6 image lacks the prometheus-rw
+      # extension, so this is best-effort: the app /metrics histogram is
+      # the authoritative source and is scraped regardless. Enabling the
+      # receiver is harmless and future-proofs a k6 image that supports it.
+      - --web.enable-remote-write-receiver
     volumes:
       - ./infra/observability/prometheus:/etc/prometheus:ro
       - prometheus-data:/prometheus
