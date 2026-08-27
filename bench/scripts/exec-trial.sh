@@ -75,14 +75,18 @@ TRIAL_DIR="$RUNS_HOST/$TRIAL_ID"
 mkdir -p "$TRIAL_DIR"
 
 # Record trial metadata up front. The k6 outputs fill in their slots
-# as each phase completes.
+# as each phase completes. The framework image is read from the running
+# bench-app container (authoritative: it is what is actually under test),
+# falling back to APP_IMAGE when the app has already stopped.
+FRAMEWORK_IMAGE="$(docker inspect -f '{{.Config.Image}}' bench-app 2>/dev/null || true)"
+FRAMEWORK_IMAGE="${FRAMEWORK_IMAGE:-${APP_IMAGE:-unknown}}"
 python3 - <<EOF > "$TRIAL_DIR/manifest.json.tmp"
 import json
 phases = "$PHASES".split(",")
 print(json.dumps({
     "trial_id": "$TRIAL_ID",
     "started_at": "$(date -Iseconds)",
-    "framework_image": "${APP_IMAGE:-unknown}",
+    "framework_image": "$FRAMEWORK_IMAGE",
     "phases": phases,
     "config": {
         "target_rps": int("${TARGET_RPS:-10000}"),
@@ -92,7 +96,9 @@ print(json.dumps({
         "ramp_start_rps": int("${RAMP_START_RPS:-500}"),
         "ramp_end_rps": int("${RAMP_END_RPS:-10000}"),
         "ramp_stages": int("${RAMP_STAGES:-10}"),
-        "saturation_duration": "${SATURATION_DURATION:-10m}"
+        "saturation_duration": "${SATURATION_DURATION:-10m}",
+        "workloads": "${WORKLOADS:-json,product_read,order_write,dashboard}".split(","),
+        "app_cores": int("${APP_CPUS:-4}")
     }
 }, indent=2))
 EOF
@@ -155,8 +161,12 @@ run_phase() {
   local phase="$1"
   local script="/scripts/${phase}.js"
   local env_args=(
-    -e TARGET_BASE_URL="http://${BENCH_APP_HOST:-127.0.0.1}:${APP_PORT:-8080}"
+    # k6 runs INSIDE the loadgen container, so the target is the app's
+    # service name on bench_edge (`app`), not the host loopback. In
+    # distributed mode BENCH_APP_HOST is the app node's private IP.
+    -e TARGET_BASE_URL="http://${BENCH_APP_HOST:-app}:8080"
     -e TARGET_RPS="${TARGET_RPS:-10000}"
+    -e WORKLOADS="${WORKLOADS:-json,product_read,order_write,dashboard}"
   )
   case "$phase" in
     warmup)
@@ -257,10 +267,13 @@ docker exec bench-db psql -U "${POSTGRES_USER:-bench}" -d "${POSTGRES_DB:-bench}
 # server-side and host view (the framework /metrics histogram, the
 # container CPU/memory, and the host pressure-stall information).
 # ---------------------------------------------------------------------------
-if [[ " $PHASES " == *" saturation "* ]]; then
+if [[ ",$PHASES," == *",saturation,"* ]]; then
   echo "==> capturing telemetry"
-  SAT_START=$(python3 -c "import json; print((json.load(open('$TRIAL_DIR/manifest.json')).get('saturation') or {}).get('started_at') or '')" 2>/dev/null)
-  SAT_END=$(python3 -c "import json; print((json.load(open('$TRIAL_DIR/manifest.json')).get('saturation') or {}).get('ended_at') or '')" 2>/dev/null)
+  # Read the phase's wall-clock files, which exist at this point. The
+  # manifest's saturation block is only written in the final update
+  # below, so it cannot be used here.
+  SAT_START="$(cat "$TRIAL_DIR/saturation.started_at" 2>/dev/null || true)"
+  SAT_END="$(cat "$TRIAL_DIR/saturation.ended_at" 2>/dev/null || true)"
   if [ -n "$SAT_START" ] && [ -n "$SAT_END" ]; then
     "$ROOT/bench/scripts/collect-telemetry.sh" "$TRIAL_DIR" "$SAT_START" "$SAT_END" 2>&1 \
       | sed 's/^/    /' || echo "    (telemetry issues, see above)"

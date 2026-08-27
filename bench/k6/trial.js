@@ -10,26 +10,21 @@
 //   k6 run bench/k6/trial.js
 //   TARGET_RPS=10000 k6 run bench/k6/trial.js
 
-import { stages, TARGET_RPS } from './lib/config.js';
+import { stages, startRate, SUMMARY_TREND_STATS, TARGET_RPS, WORKLOADS } from './lib/config.js';
 import {
-  jsonScenario, productReadScenario, orderWriteScenario, dashboardScenario,
+  buildScenarios,
   jsonWorkload, productReadWorkload, orderWriteWorkload, dashboardWorkload,
 } from './lib/endpoints.js';
 import { handleSummary } from './lib/output.js';
 
 const satStages = stages('saturation');
 
-console.log(`trial: warmup -> ramp -> saturation, peak ${TARGET_RPS} RPS`);
+console.log(`trial: warmup -> ramp -> saturation, peak ${TARGET_RPS} RPS (workloads: ${WORKLOADS.join(',')})`);
 
 export const options = {
-  scenarios: Object.assign(
-    {},
-    jsonScenario(satStages),
-    productReadScenario(satStages),
-    orderWriteScenario(satStages),
-    dashboardScenario(satStages),
-  ),
+  scenarios: buildScenarios(satStages, WORKLOADS, startRate('saturation')),
   thresholds: {},
+  summaryTrendStats: SUMMARY_TREND_STATS,
 };
 
 export { handleSummary };

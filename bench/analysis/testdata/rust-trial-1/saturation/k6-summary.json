@@ -1,0 +1,64 @@
+{
+  "metrics": {
+    "http_reqs": {
+      "type": "counter",
+      "values": {
+        "count": 357000,
+        "rate": 3966.6666666666665
+      }
+    },
+    "http_req_duration": {
+      "type": "trend",
+      "values": {
+        "avg": 0.2,
+        "min": 0.03,
+        "med": 0.12,
+        "max": 5.0,
+        "p(90)": 0.3,
+        "p(95)": 0.5,
+        "p(99)": 1.0,
+        "p(99.9)": 3.0
+      }
+    },
+    "http_req_duration{workload:json}": {
+      "type": "trend",
+      "values": {
+        "avg": 0.18,
+        "min": 0.03,
+        "med": 0.12,
+        "max": 4.0,
+        "p(90)": 0.3,
+        "p(95)": 0.5,
+        "p(99)": 1.0,
+        "p(99.9)": 3.0
+      }
+    },
+    "http_req_duration{workload:product_read}": {
+      "type": "trend",
+      "values": {
+        "avg": 0.18,
+        "min": 0.03,
+        "med": 0.12,
+        "max": 4.0,
+        "p(90)": 0.3,
+        "p(95)": 0.5,
+        "p(99)": 1.0,
+        "p(99.9)": 3.0
+      }
+    }
+  },
+  "root_group": {
+    "checks": [
+      {
+        "name": "json: status 200",
+        "passes": 179000,
+        "fails": 0
+      },
+      {
+        "name": "product_read: status 200 or 404",
+        "passes": 178000,
+        "fails": 0
+      }
+    ]
+  }
+}

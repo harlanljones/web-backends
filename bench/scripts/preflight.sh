@@ -216,7 +216,9 @@ observe() {
 
   # NIC ring buffers, recorded per interface that is up and not loopback.
   if command -v ethtool >/dev/null 2>&1; then
-    for nic in $(ls /sys/class/net 2>/dev/null); do
+    for nic_path in /sys/class/net/*; do
+      [ -e "$nic_path" ] || continue
+      nic="${nic_path##*/}"
       [ "$nic" = "lo" ] && continue
       [ "$(cat "/sys/class/net/$nic/operstate" 2>/dev/null)" = "up" ] || continue
       local rx rxmax

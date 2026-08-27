@@ -143,21 +143,18 @@ PRIMARY_CHECK = {
 }
 
 
-def telemetry_mean_series(trial_dir: str, label_key: str, label_val: str,
-                          prefer: Optional[str] = None) -> Optional[float]:
-    """Mean of a metric series from the telemetry/ query_range JSONs.
+def telemetry_series(trial_dir: str, match) -> list[float]:
+    """Flatten the values of every telemetry series whose metric matches.
 
-    The telemetry collector stores one .json per PromQL. Each holds the
-    Prometheus `query_range` response: a matrix with per-series
-    `values` as [ [ts, value], ... ]. We find the series whose metric
-    has label `label_key == label_val` and return the mean of its
-    values over the window. `prefer` optionally picks a specific
-    __name__/series order; we just flatten across matching series.
+    The telemetry collector stores one .json per PromQL under
+    `telemetry/`. Each holds the Prometheus `query_range` response: a
+    matrix with per-series `values` as [ [ts, value], ... ]. `match` is
+    a predicate over a series' metric label dict.
     """
     values: list[float] = []
     tdir = os.path.join(trial_dir, "telemetry")
     if not os.path.isdir(tdir):
-        return None
+        return values
     for name in os.listdir(tdir):
         if not name.endswith(".json"):
             continue
@@ -166,33 +163,40 @@ def telemetry_mean_series(trial_dir: str, label_key: str, label_val: str,
                 d = json.load(f)
         except (OSError, ValueError):
             continue
-        data = d.get("data") or {}
-        for series in data.get("result", []):
-            metric = series.get("metric", {})
-            if metric.get(label_key) != label_val:
+        for series in (d.get("data") or {}).get("result", []):
+            if not match(series.get("metric", {})):
                 continue
             for _, val in series.get("values", []):
                 try:
                     values.append(float(val))
                 except (TypeError, ValueError):
                     continue
-    return mean(values) if values else None
+    return values
 
 
 def parse_telemetry_metrics(trial_dir: str) -> dict:
     """Read memory and CPU for the app container from telemetry series.
 
-    Returns {"mem_mb": mean RSS in MB, "cpu_percent": mean CPU in %}.
-    None where the series was not captured (e.g. smoke environments).
+    Returns {"mem_mb": mean RSS in MB, "cpu_cores": mean CPU in cores}.
+    None where the series was not captured.
+
+    The two series must be told apart, not just matched on the container
+    name: `container_memory_rss` (bytes, has __name__) vs the cAdvisor
+    CPU rate `rate(container_cpu_usage_seconds_total{...})` (cores/s;
+    its query_range result carries no __name__ but does carry the `cpu`
+    label). Both share `name="bench-app"`.
     """
-    app_cpu = telemetry_mean_series(trial_dir, "name", "bench-app")
-    app_mem = telemetry_mean_series(trial_dir, "name", "bench-app")
-    # CPU is a rate (s/s) over the window -> percent = rate * 100
-    # normalized per core. We report the observed rate as a fraction
-    # of one core; the report normalizes by the core count.
+    mem_vals = telemetry_series(
+        trial_dir,
+        lambda m: m.get("__name__") == "container_memory_rss" and m.get("name") == "bench-app",
+    )
+    cpu_vals = telemetry_series(
+        trial_dir,
+        lambda m: m.get("name") == "bench-app" and "cpu" in m,
+    )
     return {
-        "mem_mb": round(app_mem / 1024 / 1024, 1) if app_mem else None,
-        "cpu_part_of_one_core": round(app_cpu, 4) if app_cpu is not None else None,
+        "mem_mb": round(mean(mem_vals) / 1024 / 1024, 1) if mem_vals else None,
+        "cpu_cores": round(mean(cpu_vals), 4) if cpu_vals else None,
     }
 
 
@@ -214,26 +218,35 @@ def load_trial(trial_dir: str) -> Optional[dict]:
     m = re.match(r"bench/([^:]+)", image)
     framework = m.group(1) if m else None
 
-    # Cores for RPS/core, from the app-node preflight (cpu_count). The
-    # preflight records nproc on the role host; the app node is the one
-    # whose cores the framework is pinned to.
+    # Cores for RPS/core. The app node's *allocated* cores (APP_CPUS, the
+    # cpuset the app container is pinned to) is the correct denominator;
+    # the host's nproc (what preflight records) overstates it on any host
+    # that also runs other roles or a desktop. Prefer the manifest's
+    # app_cores, fall back to the app-node preflight cpu_count.
     cores = None
-    for role in ("app", "db", "loadgen"):
-        pf_path = os.path.join(trial_dir, f"preflight-{role}.json")
-        if os.path.isfile(pf_path):
-            try:
-                with open(pf_path) as pf:
-                    pfdata = json.load(pf)
-                cc = None
-                for c in pfdata.get("checks", []):
-                    if c.get("name") == "cpu_count":
-                        cc = c.get("observed")
-                if cc and str(cc).strip().isdigit():
-                    cores = int(str(cc).strip())
-                    if role == "app":
-                        break
-            except (OSError, ValueError):
-                pass
+    config = manifest.get("config") or {}
+    if config.get("app_cores"):
+        try:
+            cores = int(config["app_cores"])
+        except (TypeError, ValueError):
+            cores = None
+    if cores is None:
+        for role in ("app", "db", "loadgen"):
+            pf_path = os.path.join(trial_dir, f"preflight-{role}.json")
+            if os.path.isfile(pf_path):
+                try:
+                    with open(pf_path) as pf:
+                        pfdata = json.load(pf)
+                    cc = None
+                    for c in pfdata.get("checks", []):
+                        if c.get("name") == "cpu_count":
+                            cc = c.get("observed")
+                    if cc and str(cc).strip().isdigit():
+                        cores = int(str(cc).strip())
+                        if role == "app":
+                            break
+                except (OSError, ValueError):
+                    pass
 
     # Throughput from the k6 summary. The aggregated http_reqs count
     # gives total iterations; divide by the saturation duration for
@@ -268,7 +281,7 @@ def load_trial(trial_dir: str) -> Optional[dict]:
         "saturation_seconds": dur_s,
         "cores": cores,
         "mem_mb": telemetry.get("mem_mb"),
-        "cpu_part_of_one_core": telemetry.get("cpu_part_of_one_core"),
+        "cpu_cores": telemetry.get("cpu_cores"),
         "preflight_failed": manifest.get("preflight_failed"),
         "status": manifest.get("status"),
         "workloads": workloads,
@@ -422,8 +435,8 @@ def build_results(usable: list[dict]) -> list[dict]:
                     if pt and pt.get("rps") is not None and core_vals and core_vals[0]]
         # Latency percentiles (ms)
         lat_metrics = [
-            (p, [pt.get("latency", {}).get(p) for pt in per_trial
-                 if pt and pt.get("latency", {}).get(p) is not None])
+            (p, [(pt.get("latency") or {}).get(p) for pt in per_trial
+                 if pt and (pt.get("latency") or {}).get(p) is not None])
             for p in ("avg_ms", "med_ms", "p90_ms", "p95_ms", "p99_ms", "p999_ms", "max_ms")
         ]
         out.append({
@@ -436,12 +449,12 @@ def build_results(usable: list[dict]) -> list[dict]:
     # Framework-level resource summary (memory, CPU), aggregated across
     # the used trials.
     mem = [t.get("mem_mb") for t in usable if t.get("mem_mb") is not None]
-    cpu = [t.get("cpu_part_of_one_core") for t in usable if t.get("cpu_part_of_one_core") is not None]
+    cpu = [t.get("cpu_cores") for t in usable if t.get("cpu_cores") is not None]
     return {
         "workloads": out,
         "resources": {
             "mem_mb": aggregate(mem),
-            "cpu_part_of_one_core": aggregate(cpu),
+            "cpu_cores": aggregate(cpu),
         },
     }
 
@@ -465,8 +478,8 @@ def emit_table(discarded, skipped, usable) -> None:
         m = res["mem_mb"]
         print(f"{'mem_mb':<12} {m['n']:<2} {fmt(m['mean']):>12} {fmt(m['ci95']):>12} "
               f"{fmt(m['min']):>12} {fmt(m['max']):>12}")
-    if res.get("cpu_part_of_one_core", {}).get("n"):
-        c = res["cpu_part_of_one_core"]
+    if res.get("cpu_cores", {}).get("n"):
+        c = res["cpu_cores"]
         print(f"{'cpu_core':<12} {c['n']:<2} {fmt(c['mean']):>12} {fmt(c['ci95']):>12} "
               f"{fmt(c['min']):>12} {fmt(c['max']):>12}")
     print()

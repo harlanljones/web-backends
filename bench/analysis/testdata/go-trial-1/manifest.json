@@ -1,0 +1,30 @@
+{
+  "trial_id": "test-go-trial-1",
+  "started_at": "2026-01-01T00:00:00Z",
+  "ended_at": "2026-01-01T00:01:40Z",
+  "framework_image": "bench/go:latest",
+  "phases": [
+    "warmup",
+    "ramp",
+    "saturation"
+  ],
+  "phases_run": [
+    "warmup",
+    "ramp",
+    "saturation"
+  ],
+  "preflight_failed": 0,
+  "status": 0,
+  "config": {
+    "app_cores": 4,
+    "target_rps": 2000,
+    "workloads": [
+      "json",
+      "product_read"
+    ]
+  },
+  "saturation": {
+    "started_at": "2026-01-01T00:00:10Z",
+    "ended_at": "2026-01-01T00:01:40Z"
+  }
+}

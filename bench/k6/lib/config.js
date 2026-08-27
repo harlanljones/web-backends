@@ -12,6 +12,14 @@
 
 export const TARGET_BASE_URL = __ENV.TARGET_BASE_URL || 'http://app:8080';
 
+// Which workloads a phase runs. Comma-separated subset of the four
+// workload names. Defaults to all four. A read-only benchmark sets
+// WORKLOADS=json,product_read (no writes, no seed mutation).
+export const WORKLOADS = (__ENV.WORKLOADS || 'json,product_read,order_write,dashboard')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 // Phases
 // -------
 // WARMUP   3 minutes at 20% of the trial's RPS. Lets the database
@@ -54,6 +62,12 @@ export const SATURATION_THRESHOLDS = {
   'http_req_duration': ['p(99.9)<1000'],
 };
 
+// Trend percentiles k6 must compute for the summary. The default set is
+// ['avg','min','med','max','p(90)','p(95)']; the benchmark's headline
+// p99/p99.9 (and aggregate.py) need the longer list, so it is set
+// explicitly on every phase.
+export const SUMMARY_TREND_STATS = ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)', 'p(99.9)'];
+
 // Per-VU request rate. k6's open-model arrival-rate executor targets
 // a fixed rate; the VU pool is sized so the rate is achievable with
 // some headroom for retries. The ratio of VU to RPS is per-workload
@@ -87,6 +101,23 @@ export function stages(phase /* 'warmup' | 'ramp' | 'saturation' */) {
       return [{ duration: SATURATION_DURATION, target: TARGET_RPS }];
   }
   throw new Error(`unknown phase: ${phase}`);
+}
+
+// The iteration start rate for a phase's FIRST stage. `ramping-arrival-rate`
+// ramps linearly from `startRate` (default 0) to the first stage's `target`,
+// so a single-stage warmup/saturation must set `startRate` equal to its target
+// or it will average half the intended rate. The ramp phase starts at its
+// ramp floor rather than 0.
+export function startRate(phase /* 'warmup' | 'ramp' | 'saturation' */) {
+  switch (phase) {
+    case 'warmup':
+      return Math.round(TARGET_RPS * WARMUP_RPS_FRAC);
+    case 'ramp':
+      return RAMP_START_RPS;
+    case 'saturation':
+      return TARGET_RPS;
+  }
+  return 0;
 }
 
 // Parse a k6 duration like "3m" or "30s" into seconds. Used to derive

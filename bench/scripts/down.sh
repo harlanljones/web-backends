@@ -23,6 +23,11 @@ done
 # shellcheck disable=SC1091
 set -a; . "$ROOT/.env"; set +a
 
+# Compose interpolates APP_IMAGE (declared `:?` in the compose file) even
+# for `down`. Export a placeholder so teardown works whether or not an app
+# was named, mirroring up.sh.
+export APP_IMAGE="${APP_IMAGE:-bench/none:latest}"
+
 ARGS=(--env-file "$ROOT/.env"
       --profile single --profile db --profile app
       --profile loadgen --profile telemetry down --remove-orphans)

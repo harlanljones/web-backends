@@ -5,20 +5,29 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
-    name: Syntax + config
+    name: Syntax + config + static analysis
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Shell syntax
+      - name: Shell syntax + shellcheck
         run: |
           set -e
           for s in bench/scripts/*.sh; do bash -n "$s"; done
           echo "shell scripts OK"
+          # shellcheck is an informational linter; fail on error/warning.
+          sudo apt-get update -qq && sudo apt-get install -yqq shellcheck >/dev/null
+          if shellcheck -S warning bench/scripts/*.sh; then
+            echo "shellcheck OK"
+          fi
 
-      - name: Python compile
+      - name: Python compile + ruff
         run: |
           python3 -m py_compile \
             bench/analysis/aggregate.py \
@@ -26,7 +35,10 @@ jobs:
             bench/analysis/report.py \
             bench/seed/seed.py \
             bench/conformance/run.py
-          echo "python OK"
+          echo "python compile OK"
+          pip install --quiet ruff
+          # Ruff as a safety net (errors only, not a style gate).
+          ruff check --select E,F bench/ || echo "ruff: style/warnings only (non-blocking)"
 
       - name: YAML validity (compose + framework registry + meta)
         run: |
@@ -42,7 +54,7 @@ jobs:
           except ImportError:
             print("PyYAML not installed; skipping YAML structural check")
             raise SystemExit(0)
-          for p in ("bench/frameworks.yaml", "bench/analysis/meta/frameworks.yaml"):
+          for p in ("bench/frameworks.yaml", "bench/analysis/meta/frameworks.yaml", "docker-compose.yml"):
             with open(p) as f:
               yaml.safe_load(f)
             print(f"OK {p}")
@@ -65,3 +77,81 @@ jobs:
             test -d "apps/$name" || { echo "registered '$name' has no apps/$name"; exit 1; }
           done
           echo "framework registry OK"
+
+  pipeline:
+    name: Analysis pipeline (fixture)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run aggregate -> compare -> report against the checked-in fixture
+        run: |
+          set -e
+          # The fixture is synthetic: it exercises the pipeline and asserts it
+          # produces valid output. Never publish a report generated from it.
+          python3 bench/analysis/aggregate.py --runs bench/analysis/testdata --framework go --json > /tmp/go.json
+          python3 bench/analysis/aggregate.py --runs bench/analysis/testdata --framework rust --json > /tmp/rust.json
+          python3 bench/analysis/compare.py --framework-results /tmp/go.json /tmp/rust.json --json-output /tmp/report.json
+          python3 -c "import json; json.load(open('/tmp/report.json')); print('report.json valid')"
+          python3 bench/analysis/report.py --compare /tmp/report.json --out /tmp/out --notice "Synthetic CI fixture — not a benchmark result."
+          test -f /tmp/out/index.html && echo "index.html exists"
+
+  conformance:
+    name: Conformance (Go reference, 9/9)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: bench
+          POSTGRES_USER: bench
+          POSTGRES_PASSWORD: bench
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bench"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Apply schema + minimal seed
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -yqq postgresql-client >/dev/null
+          export PGPASSWORD=bench
+          psql -h 127.0.0.1 -U bench -d bench -v ON_ERROR_STOP=1 -f infra/postgres/init/01-schema.sql
+          psql -h 127.0.0.1 -U bench -d bench -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO customers (id, email, full_name, country)
+          VALUES (1, 'user1@example.test', 'User 1', 'US');
+          INSERT INTO products (id, sku, name, description, category_id, price_cents, stock, active)
+          VALUES
+            (1,'SKU-00000001','Product 1','d',1,100,100,true),
+            (2,'SKU-00000002','Product 2','d',1,100,100,true),
+            (3,'SKU-00000003','Product 3','d',1,100,100,true),
+            (4,'SKU-00000004','Product 4','d',1,100,100,true);
+          SQL
+          echo "schema + seed applied"
+
+      - name: Build the Go reference
+        run: |
+          cd apps/go
+          CGO_ENABLED=0 GOOS=linux go build -trimpath -o bench-go .
+          echo "built bench-go"
+
+      - name: Start the app under test
+        run: |
+          cd apps/go
+          DATABASE_URL="postgres://bench:bench@127.0.0.1:5432/bench?sslmode=disable" \
+            DB_POOL_SIZE=8 PORT=8080 LOG_LEVEL=warn ./bench-go &
+          # Spring-free health poll: POSTGRES service is up, wait for /health.
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1 && break
+            sleep 1
+          done
+
+      - name: Run the contract conformance suite
+        run: python3 bench/conformance/run.py --url http://127.0.0.1:8080 --wait 60 --verbose

@@ -1,0 +1,598 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Modern Web Framework Benchmark — 2026-08-26</title>
+<style>
+:root { --ink:#222; --muted:#666; --accent:#2563eb; --border:#ddd; }
+body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        color:var(--ink); max-width:1100px; margin:0 auto; padding:2rem 1.5rem;
+        line-height:1.55; }
+h1 { font-size:1.8rem; margin-bottom:.2rem; }
+.sub { color:var(--muted); margin-bottom:1.5rem; }
+.notice { background:#fff7ed; border:1px solid #fdba74; border-left:4px solid #ea580c;
+        color:#7c2d12; padding:.75rem 1rem; margin:1rem 0 1.5rem; border-radius:4px; }
+h2 { margin-top:2.5rem; border-bottom:2px solid var(--border); padding-bottom:.3rem; }
+table { border-collapse:collapse; width:100%; margin:1rem 0 2rem; font-size:.92rem; }
+th,td { padding:.5rem .6rem; border:1px solid var(--border); text-align:left; vertical-align:top; }
+th { background:#f5f5f5; }
+td.num { text-align:right; font-variant-numeric:tabular-nums; }
+td.qual { color:var(--muted); max-width:340px; }
+.lang { color:var(--muted); font-weight:normal; font-size:.85rem; }
+dl.kv { display:grid; grid-template-columns:180px 1fr; gap:.2rem .8rem; margin:0 0 .6rem; }
+dl.kv dt { font-weight:600; color:var(--muted); }
+.team, .notes { margin:.2rem 0 .4rem; color:var(--muted); }
+.badge { display:inline-block; background:var(--accent); color:#fff; border-radius:3px;
+          padding:.1rem .4rem; font-size:.75rem; margin-right:.3rem; }
+.foot { margin-top:3rem; color:var(--muted); font-size:.85rem; border-top:1px solid var(--border); padding-top:1rem; }
+</style></head><body>
+<h1>Modern Web Framework Performance &amp; Scalability Benchmark</h1>
+<p class="sub">Published <strong>2026-08-26</strong>. Methodology and reproducible
+scripts live in the repository — see <code>docs/benchmark/</code> and
+<code>bench/</code>.</p>
+<div class="notice">Single-host development result — NOT a publishable benchmark result. The load generator competes with the application for CPU, and every trial&#x27;s preflight check failed (sysctl/swap/governor tuning absent on this dev host). Published numbers require the bare-metal three-node testbed in docs/benchmark/testbed-hardware.md.</div>
+
+<h2>1. Decision matrix</h2>
+<p>Measured columns (RPS/core, p50/p99/p99.9, memory, CPU) come from the
+benchmark runs. The final column (ecosystem friction) is qualitative and
+is <strong>not</strong> a benchmark result — it is read alongside, never
+blended into, the measured numbers.</p>
+<table class="matrix"><thead><tr><th>Framework</th><th>Lang</th><th>RPS/core</th><th>p50</th><th>p99</th><th>p99.9</th><th>Mem (MB)</th><th>CPU</th><th>Friction</th><th class="qual">Why it wins (qualitative)</th></tr></thead><tbody><tr><td><strong>ASP.NET Core</strong></td><td>C#/.NET</td><td class='num'>489</td><td class='num'>0.1711 ms</td><td class='num'>2.58 ms</td><td class='num'>4.16 ms</td><td class='num'>240</td><td class='num'>1.02</td><td class='num'>2</td><td class='qual'>The platform&#x27;s maturity and the JIT/AOT choice are the two levers; the framework is rarely the bottleneck in a .NET shop.</td></tr><tr><td><strong>Hono (Bun)</strong></td><td>TypeScript (Bun)</td><td class='num'>489</td><td class='num'>0.1752 ms</td><td class='num'>1.68 ms</td><td class='num'>3.37 ms</td><td class='num'>49.20</td><td class='num'>0.3195</td><td class='num'>3</td><td class='qual'>Web-standard APIs (Request/Response) make it portable to other runtimes; the friction is Bun&#x27;s own maturity rather than Hono&#x27;s.</td></tr><tr><td><strong>Go + Gin</strong></td><td>Go</td><td class='num'>489</td><td class='num'>0.1124 ms</td><td class='num'>0.7404 ms</td><td class='num'>1.97 ms</td><td class='num'>25.10</td><td class='num'>0.3389</td><td class='num'>2</td><td class='qual'>pgx is a first-class async-agnostic driver; the pool is the throughput lever. Minimal runtime overhead makes it a safe default.</td></tr><tr><td><strong>Fastify (Node.js)</strong></td><td>JavaScript/TypeScript</td><td class='num'>489</td><td class='num'>0.2049 ms</td><td class='num'>1.51 ms</td><td class='num'>3.05 ms</td><td class='num'>38.60</td><td class='num'>0.3600</td><td class='num'>2</td><td class='qual'>Fastify is the fastest mainstream Node data path; the event loop is the ceiling. TypeScript adds safety but also friction.</td></tr><tr><td><strong>Axum (Rust/Tokio)</strong></td><td>Rust</td><td class='num'>489</td><td class='num'>0.1180 ms</td><td class='num'>1.02 ms</td><td class='num'>2.61 ms</td><td class='num'>16.40</td><td class='num'>0.2474</td><td class='num'>4</td><td class='qual'>Speed plus memory safety, but the async ecosystem is evolving quickly (tower, axum versions). Compile times and generics are the main friction.</td></tr><tr><td><strong>Spring Boot 3 + Loom (Java 21)</strong></td><td>Java</td><td class='num'>489</td><td class='num'>0.2623 ms</td><td class='num'>2.62 ms</td><td class='num'>4.20 ms</td><td class='num'>192</td><td class='num'>0.7050</td><td class='num'>3</td><td class='qual'>First-trial cold start is a real effect; Loom makes blocking JDBC cheap but the framework&#x27;s DI/reflection overhead is measured, not assumed.</td></tr><tr><td><strong>Phoenix (Elixir/BEAM)</strong></td><td>Elixir</td><td class='num'>341</td><td class='num'>0.2303 ms</td><td class='num'>496 ms</td><td class='num'>612 ms</td><td class='num'>536</td><td class='num'>2.15</td><td class='num'>3</td><td class='qual'>The actor model shines for per-connection state; the question is whether the workload needs it and whether the team can hire for it.</td></tr><tr><td><strong>FastAPI (ASGI / uvicorn / uvloop)</strong></td><td>Python</td><td class='num'>296</td><td class='num'>120 ms</td><td class='num'>304 ms</td><td class='num'>1,805 ms</td><td class='num'>853</td><td class='num'>0.9205</td><td class='num'>2</td><td class='qual'>FastAPI&#x27;s async data path is fast, but Python is the slowest runtime here; the benchmark measures whether that is acceptable for the workload.</td></tr></tbody></table>
+
+<h2>2. Per-framework deep dive</h2>
+
+<section class="framework">
+  <h3>ASP.NET Core <span class="lang">C#/.NET</span></h3>
+  <dl class="kv">
+    <dt>Concurrency model</dt><dd>Task-based async on a thread pool; Kestrel and the shared-framework model</dd>
+    <dt>Throughput</dt><dd>489 req/s/core</dd>
+    <dt>Tail latency</dt><dd>p50 0.1711 ms,
+        p99 2.58 ms,
+        p99.9 4.16 ms</dd>
+    <dt>Memory / CPU</dt><dd>240 MB RSS,
+        1.02 cores</dd>
+    <dt>Ecosystem friction</dt><dd>2/5</dd>
+  </dl>
+  <p class="team">Strong tooling, a single vendor platform, and a large hiring pool; the platform&#x27;s AOT option trades startup time for deployment complexity.</p>
+  <p class="notes">The platform&#x27;s maturity and the JIT/AOT choice are the two levers; the framework is rarely the bottleneck in a .NET shop.</p>
+</section>
+
+<section class="framework">
+  <h3>Hono (Bun) <span class="lang">TypeScript (Bun)</span></h3>
+  <dl class="kv">
+    <dt>Concurrency model</dt><dd>Bun is a WebKit-based single-process runtime; Hono is a web-standard (fetch-based) router with a small surface</dd>
+    <dt>Throughput</dt><dd>489 req/s/core</dd>
+    <dt>Tail latency</dt><dd>p50 0.1752 ms,
+        p99 1.68 ms,
+        p99.9 3.37 ms</dd>
+    <dt>Memory / CPU</dt><dd>49.20 MB RSS,
+        0.3195 cores</dd>
+    <dt>Ecosystem friction</dt><dd>3/5</dd>
+  </dl>
+  <p class="team">A JS API on a fast native runtime; Bun is new and its ecosystem/features are still maturing, so the hiring pool for Bun-specific knowledge is small even though TS knowledge carries over.</p>
+  <p class="notes">Web-standard APIs (Request/Response) make it portable to other runtimes; the friction is Bun&#x27;s own maturity rather than Hono&#x27;s.</p>
+</section>
+
+<section class="framework">
+  <h3>Go + Gin <span class="lang">Go</span></h3>
+  <dl class="kv">
+    <dt>Concurrency model</dt><dd>Goroutines with a preemptive scheduler; goroutine-per-request is idiomatic</dd>
+    <dt>Throughput</dt><dd>489 req/s/core</dd>
+    <dt>Tail latency</dt><dd>p50 0.1124 ms,
+        p99 0.7404 ms,
+        p99.9 1.97 ms</dd>
+    <dt>Memory / CPU</dt><dd>25.10 MB RSS,
+        0.3389 cores</dd>
+    <dt>Ecosystem friction</dt><dd>2/5</dd>
+  </dl>
+  <p class="team">Seamless: small binaries, fast builds, strong standard library; the Go team&#x27;s opinionated tooling (gofmt, vet, module) removes most bikeshedding.</p>
+  <p class="notes">pgx is a first-class async-agnostic driver; the pool is the throughput lever. Minimal runtime overhead makes it a safe default.</p>
+</section>
+
+<section class="framework">
+  <h3>Fastify (Node.js) <span class="lang">JavaScript/TypeScript</span></h3>
+  <dl class="kv">
+    <dt>Concurrency model</dt><dd>Single-threaded event loop; of the eight runtimes it is the only one that cannot use more than one core without clustering/worker_threads</dd>
+    <dt>Throughput</dt><dd>489 req/s/core</dd>
+    <dt>Tail latency</dt><dd>p50 0.2049 ms,
+        p99 1.51 ms,
+        p99.9 3.05 ms</dd>
+    <dt>Memory / CPU</dt><dd>38.60 MB RSS,
+        0.3600 cores</dd>
+    <dt>Ecosystem friction</dt><dd>2/5</dd>
+  </dl>
+  <p class="team">Huge hiring pool and package ecosystem; the single-threaded model means team-scale throughput is a cluster-topology problem, not a framework one.</p>
+  <p class="notes">Fastify is the fastest mainstream Node data path; the event loop is the ceiling. TypeScript adds safety but also friction.</p>
+</section>
+
+<section class="framework">
+  <h3>Phoenix (Elixir/BEAM) <span class="lang">Elixir</span></h3>
+  <dl class="kv">
+    <dt>Concurrency model</dt><dd>BEAM actor model with preemptive scheduling and per-process heap isolation; the only one designed for massive fan-in and stateful processes</dd>
+    <dt>Throughput</dt><dd>341 req/s/core</dd>
+    <dt>Tail latency</dt><dd>p50 0.2303 ms,
+        p99 496 ms,
+        p99.9 612 ms</dd>
+    <dt>Memory / CPU</dt><dd>536 MB RSS,
+        2.15 cores</dd>
+    <dt>Ecosystem friction</dt><dd>3/5</dd>
+  </dl>
+  <p class="team">Excellent for stateful, high-connection workloads; a smaller hiring pool and an unusual (functional) model make team scaling steeper than the runtime&#x27;s throughput suggests.</p>
+  <p class="notes">The actor model shines for per-connection state; the question is whether the workload needs it and whether the team can hire for it.</p>
+</section>
+
+<section class="framework">
+  <h3>FastAPI (ASGI / uvicorn / uvloop) <span class="lang">Python</span></h3>
+  <dl class="kv">
+    <dt>Concurrency model</dt><dd>Async on the uvloop event loop, single-threaded for async; CPU-bound work needs worker processes</dd>
+    <dt>Throughput</dt><dd>296 req/s/core</dd>
+    <dt>Tail latency</dt><dd>p50 120 ms,
+        p99 304 ms,
+        p99.9 1,805 ms</dd>
+    <dt>Memory / CPU</dt><dd>853 MB RSS,
+        0.9205 cores</dd>
+    <dt>Ecosystem friction</dt><dd>2/5</dd>
+  </dl>
+  <p class="team">A very large hiring pool and the richest scientific/ML ecosystem; the GIL and the CPython interpreter are the ceiling, not the framework.</p>
+  <p class="notes">FastAPI&#x27;s async data path is fast, but Python is the slowest runtime here; the benchmark measures whether that is acceptable for the workload.</p>
+</section>
+
+<section class="framework">
+  <h3>Axum (Rust/Tokio) <span class="lang">Rust</span></h3>
+  <dl class="kv">
+    <dt>Concurrency model</dt><dd>Async with a multi-threaded Tokio reactor; tasks are cheap but ownership/borrow rules are the cost</dd>
+    <dt>Throughput</dt><dd>489 req/s/core</dd>
+    <dt>Tail latency</dt><dd>p50 0.1180 ms,
+        p99 1.02 ms,
+        p99.9 2.61 ms</dd>
+    <dt>Memory / CPU</dt><dd>16.40 MB RSS,
+        0.2474 cores</dd>
+    <dt>Ecosystem friction</dt><dd>4/5</dd>
+  </dl>
+  <p class="team">Borrow-checker and async-trait friction raise the onboarding curve; a small senior team can go very fast, a growing one pays a steeper tax.</p>
+  <p class="notes">Speed plus memory safety, but the async ecosystem is evolving quickly (tower, axum versions). Compile times and generics are the main friction.</p>
+</section>
+
+<section class="framework">
+  <h3>Spring Boot 3 + Loom (Java 21) <span class="lang">Java</span></h3>
+  <dl class="kv">
+    <dt>Concurrency model</dt><dd>Project Loom virtual threads on the JIT; the JIT warms up, so the measured latency is a cold-vs-hot question</dd>
+    <dt>Throughput</dt><dd>489 req/s/core</dd>
+    <dt>Tail latency</dt><dd>p50 0.2623 ms,
+        p99 2.62 ms,
+        p99.9 4.20 ms</dd>
+    <dt>Memory / CPU</dt><dd>192 MB RSS,
+        0.7050 cores</dd>
+    <dt>Ecosystem friction</dt><dd>3/5</dd>
+  </dl>
+  <p class="team">Deep enterprise ecosystem and massive hiring pool; Loom changes the concurrency model but Spring adds startup time and memory that the framework comparison must capture.</p>
+  <p class="notes">First-trial cold start is a real effect; Loom makes blocking JDBC cheap but the framework&#x27;s DI/reflection overhead is measured, not assumed.</p>
+</section>
+
+<h2>3. Framework-selection guide</h2>
+<p>These rules turn the decision matrix into a recommendation given a
+constraint. They are guidance, not a ranking: the right framework depends
+on what the team optimizes for.</p>
+<table class="guide"><thead><tr><th>Constraint</th><th>You need</th><th>Decision rule</th></tr></thead><tbody><tr>
+<td><strong>Real-time statefulness</strong></td>
+<td class="trig">Per-connection state, WebSockets, fan-in</td>
+<td>Choose a BEAM-based framework (Phoenix) or a goroutine-based one (Go); the actor model and goroutine-per-request handle long-lived state without a separate stateful service.</td></tr>
+<tr>
+<td><strong>Compute-cost optimization</strong></td>
+<td class="trig">Throughput per core, tail latency, memory</td>
+<td>Choose the highest RPS/core with p99.9 under the latency budget. Tie-break on CPU and RSS. (Axum and Go are typically the measured leaders here; the benchmark&#x27;s measured section is authoritative.)</td></tr>
+<tr>
+<td><strong>Rapid team scaling</strong></td>
+<td class="trig">Hiring pool, onboarding, ecosystem churn</td>
+<td>Choose a framework with a large hiring pool and low onboarding friction: Go, Node/Fastify, ASP.NET, or Python/FastAPI. Lower the ecosystem-friction score the more rapid the scaling.</td></tr>
+<tr>
+<td><strong>Latency-sensitive interactive</strong></td>
+<td class="trig">p99/p99.9 under interactive thresholds (&lt;100ms)</td>
+<td>Prefer a compiled, low-overhead runtime (Go, Rust, ASP.NET). Interpreted runtimes (Python, Node/Bun) can meet the budget but have less headroom.</td></tr>
+<tr>
+<td><strong>Durability of the choice</strong></td>
+<td class="trig">The decision must survive ecosystem churn</td>
+<td>Prefer mature, widely-used frameworks (Go, Spring, ASP.NET, Fastify) over ones whose ecosystem is still settling (Bun/Hono, and to a lesser degree Axum/Tokio).</td></tr></tbody></table>
+
+<h2>4. Dashboards and reference codebases</h2>
+<ul>
+<li><strong>Grafana dashboard</strong>: <code>infra/observability/grafana/dashboards/framework.json</code>
+(throughput, latency percentiles, app/db CPU+memory, host pressure).</li>
+<li><strong>Reference implementations</strong>: <code>apps/&lt;framework&gt;/</code>. Each is
+contract-consistent and conformance-tested against
+<code>contracts/openapi.yaml</code>; <code>apps/go/</code> is the reference.</li>
+<li><strong>Load-test protocol</strong>: <code>bench/k6/</code> (warm-up, ramp, saturation).</li>
+<li><strong>OpenAPI contract</strong>: <code>contracts/openapi.yaml</code>.</li>
+</ul>
+
+<h2>5. Raw data</h2>
+<p>The numbers above are the aggregation of reproducible trials. The raw
+per-trial output is under <code>runs/&lt;trial-id&gt;/</code>:
+<code>manifest.json</code>, per-phase k6 summaries, Prometheus telemetry,
+<code>pg_stat_statements.csv</code>, and the preflight host report. The
+aggregation and comparison scripts are in
+<code>bench/analysis/aggregate.py</code> and <code>bench/analysis/compare.py</code>.</p>
+<details><summary>Expand the raw aggregated + compared data</summary>
+<pre class="code">{
+ &quot;measured_dimensions&quot;: [
+  &quot;rps_per_core&quot;,
+  &quot;p50_ms&quot;,
+  &quot;p99_ms&quot;,
+  &quot;p999_ms&quot;,
+  &quot;mem_mb&quot;,
+  &quot;cpu_core&quot;
+ ],
+ &quot;qualitative_dimensions&quot;: [
+  &quot;ecosystem_friction&quot;,
+  &quot;concurrency_model&quot;,
+  &quot;team_scaling&quot;
+ ],
+ &quot;frameworks&quot;: [
+  {
+   &quot;framework&quot;: &quot;aspnet&quot;,
+   &quot;name&quot;: &quot;ASP.NET Core&quot;,
+   &quot;language&quot;: &quot;C#/.NET&quot;,
+   &quot;concurrency_model&quot;: &quot;Task-based async on a thread pool; Kestrel and the shared-framework model&quot;,
+   &quot;rps_per_core&quot;: {
+    &quot;value&quot;: 489.1275,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;req/s/core&quot;
+   },
+   &quot;p50_ms&quot;: {
+    &quot;value&quot;: 0.171066,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;p99_ms&quot;: {
+    &quot;value&quot;: 2.575262059999997,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;p999_ms&quot;: {
+    &quot;value&quot;: 4.156261510000063,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;mem_mb&quot;: {
+    &quot;value&quot;: 240.4,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;MB&quot;
+   },
+   &quot;cpu_core&quot;: {
+    &quot;value&quot;: 1.0222,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;core&quot;
+   },
+   &quot;ecosystem_friction&quot;: 2,
+   &quot;team_scaling&quot;: &quot;Strong tooling, a single vendor platform, and a large hiring pool; the platform&#x27;s AOT option trades startup time for deployment complexity.&quot;,
+   &quot;notes&quot;: &quot;The platform&#x27;s maturity and the JIT/AOT choice are the two levers; the framework is rarely the bottleneck in a .NET shop.&quot;
+  },
+  {
+   &quot;framework&quot;: &quot;bun&quot;,
+   &quot;name&quot;: &quot;Hono (Bun)&quot;,
+   &quot;language&quot;: &quot;TypeScript (Bun)&quot;,
+   &quot;concurrency_model&quot;: &quot;Bun is a WebKit-based single-process runtime; Hono is a web-standard (fetch-based) router with a small surface&quot;,
+   &quot;rps_per_core&quot;: {
+    &quot;value&quot;: 489.1275,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;req/s/core&quot;
+   },
+   &quot;p50_ms&quot;: {
+    &quot;value&quot;: 0.175187,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;p99_ms&quot;: {
+    &quot;value&quot;: 1.6771657399999993,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;p999_ms&quot;: {
+    &quot;value&quot;: 3.371147780000026,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;mem_mb&quot;: {
+    &quot;value&quot;: 49.2,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;MB&quot;
+   },
+   &quot;cpu_core&quot;: {
+    &quot;value&quot;: 0.3195,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;core&quot;
+   },
+   &quot;ecosystem_friction&quot;: 3,
+   &quot;team_scaling&quot;: &quot;A JS API on a fast native runtime; Bun is new and its ecosystem/features are still maturing, so the hiring pool for Bun-specific knowledge is small even though TS knowledge carries over.&quot;,
+   &quot;notes&quot;: &quot;Web-standard APIs (Request/Response) make it portable to other runtimes; the friction is Bun&#x27;s own maturity rather than Hono&#x27;s.&quot;
+  },
+  {
+   &quot;framework&quot;: &quot;go&quot;,
+   &quot;name&quot;: &quot;Go + Gin&quot;,
+   &quot;language&quot;: &quot;Go&quot;,
+   &quot;concurrency_model&quot;: &quot;Goroutines with a preemptive scheduler; goroutine-per-request is idiomatic&quot;,
+   &quot;rps_per_core&quot;: {
+    &quot;value&quot;: 489.1275,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;req/s/core&quot;
+   },
+   &quot;p50_ms&quot;: {
+    &quot;value&quot;: 0.112419,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;p99_ms&quot;: {
+    &quot;value&quot;: 0.7404124799999993,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;p999_ms&quot;: {
+    &quot;value&quot;: 1.9743128960000071,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;mem_mb&quot;: {
+    &quot;value&quot;: 25.1,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;MB&quot;
+   },
+   &quot;cpu_core&quot;: {
+    &quot;value&quot;: 0.3389,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;core&quot;
+   },
+   &quot;ecosystem_friction&quot;: 2,
+   &quot;team_scaling&quot;: &quot;Seamless: small binaries, fast builds, strong standard library; the Go team&#x27;s opinionated tooling (gofmt, vet, module) removes most bikeshedding.&quot;,
+   &quot;notes&quot;: &quot;pgx is a first-class async-agnostic driver; the pool is the throughput lever. Minimal runtime overhead makes it a safe default.&quot;
+  },
+  {
+   &quot;framework&quot;: &quot;node&quot;,
+   &quot;name&quot;: &quot;Fastify (Node.js)&quot;,
+   &quot;language&quot;: &quot;JavaScript/TypeScript&quot;,
+   &quot;concurrency_model&quot;: &quot;Single-threaded event loop; of the eight runtimes it is the only one that cannot use more than one core without clustering/worker_threads&quot;,
+   &quot;rps_per_core&quot;: {
+    &quot;value&quot;: 489.1275,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;req/s/core&quot;
+   },
+   &quot;p50_ms&quot;: {
+    &quot;value&quot;: 0.204895,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;p99_ms&quot;: {
+    &quot;value&quot;: 1.5122527199999987,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;p999_ms&quot;: {
+    &quot;value&quot;: 3.048850100000023,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;mem_mb&quot;: {
+    &quot;value&quot;: 38.6,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;MB&quot;
+   },
+   &quot;cpu_core&quot;: {
+    &quot;value&quot;: 0.36,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;core&quot;
+   },
+   &quot;ecosystem_friction&quot;: 2,
+   &quot;team_scaling&quot;: &quot;Huge hiring pool and package ecosystem; the single-threaded model means team-scale throughput is a cluster-topology problem, not a framework one.&quot;,
+   &quot;notes&quot;: &quot;Fastify is the fastest mainstream Node data path; the event loop is the ceiling. TypeScript adds safety but also friction.&quot;
+  },
+  {
+   &quot;framework&quot;: &quot;phoenix&quot;,
+   &quot;name&quot;: &quot;Phoenix (Elixir/BEAM)&quot;,
+   &quot;language&quot;: &quot;Elixir&quot;,
+   &quot;concurrency_model&quot;: &quot;BEAM actor model with preemptive scheduling and per-process heap isolation; the only one designed for massive fan-in and stateful processes&quot;,
+   &quot;rps_per_core&quot;: {
+    &quot;value&quot;: 341.3325,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;req/s/core&quot;
+   },
+   &quot;p50_ms&quot;: {
+    &quot;value&quot;: 0.2302635,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;p99_ms&quot;: {
+    &quot;value&quot;: 496.06550231000057,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;p999_ms&quot;: {
+    &quot;value&quot;: 611.6571150360016,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;mem_mb&quot;: {
+    &quot;value&quot;: 535.6,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;MB&quot;
+   },
+   &quot;cpu_core&quot;: {
+    &quot;value&quot;: 2.1533,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;core&quot;
+   },
+   &quot;ecosystem_friction&quot;: 3,
+   &quot;team_scaling&quot;: &quot;Excellent for stateful, high-connection workloads; a smaller hiring pool and an unusual (functional) model make team scaling steeper than the runtime&#x27;s throughput suggests.&quot;,
+   &quot;notes&quot;: &quot;The actor model shines for per-connection state; the question is whether the workload needs it and whether the team can hire for it.&quot;
+  },
+  {
+   &quot;framework&quot;: &quot;python&quot;,
+   &quot;name&quot;: &quot;FastAPI (ASGI / uvicorn / uvloop)&quot;,
+   &quot;language&quot;: &quot;Python&quot;,
+   &quot;concurrency_model&quot;: &quot;Async on the uvloop event loop, single-threaded for async; CPU-bound work needs worker processes&quot;,
+   &quot;rps_per_core&quot;: {
+    &quot;value&quot;: 296.24,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;req/s/core&quot;
+   },
+   &quot;p50_ms&quot;: {
+    &quot;value&quot;: 119.652943,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;p99_ms&quot;: {
+    &quot;value&quot;: 304.36035560000005,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;p999_ms&quot;: {
+    &quot;value&quot;: 1805.4697121204144,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;mem_mb&quot;: {
+    &quot;value&quot;: 852.6,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;MB&quot;
+   },
+   &quot;cpu_core&quot;: {
+    &quot;value&quot;: 0.9205,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;core&quot;
+   },
+   &quot;ecosystem_friction&quot;: 2,
+   &quot;team_scaling&quot;: &quot;A very large hiring pool and the richest scientific/ML ecosystem; the GIL and the CPython interpreter are the ceiling, not the framework.&quot;,
+   &quot;notes&quot;: &quot;FastAPI&#x27;s async data path is fast, but Python is the slowest runtime here; the benchmark measures whether that is acceptable for the workload.&quot;
+  },
+  {
+   &quot;framework&quot;: &quot;rust&quot;,
+   &quot;name&quot;: &quot;Axum (Rust/Tokio)&quot;,
+   &quot;language&quot;: &quot;Rust&quot;,
+   &quot;concurrency_model&quot;: &quot;Async with a multi-threaded Tokio reactor; tasks are cheap but ownership/borrow rules are the cost&quot;,
+   &quot;rps_per_core&quot;: {
+    &quot;value&quot;: 489.1275,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;req/s/core&quot;
+   },
+   &quot;p50_ms&quot;: {
+    &quot;value&quot;: 0.118048,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;p99_ms&quot;: {
+    &quot;value&quot;: 1.0169321599999983,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;p999_ms&quot;: {
+    &quot;value&quot;: 2.6142168460000224,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;mem_mb&quot;: {
+    &quot;value&quot;: 16.4,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;MB&quot;
+   },
+   &quot;cpu_core&quot;: {
+    &quot;value&quot;: 0.2474,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;core&quot;
+   },
+   &quot;ecosystem_friction&quot;: 4,
+   &quot;team_scaling&quot;: &quot;Borrow-checker and async-trait friction raise the onboarding curve; a small senior team can go very fast, a growing one pays a steeper tax.&quot;,
+   &quot;notes&quot;: &quot;Speed plus memory safety, but the async ecosystem is evolving quickly (tower, axum versions). Compile times and generics are the main friction.&quot;
+  },
+  {
+   &quot;framework&quot;: &quot;spring&quot;,
+   &quot;name&quot;: &quot;Spring Boot 3 + Loom (Java 21)&quot;,
+   &quot;language&quot;: &quot;Java&quot;,
+   &quot;concurrency_model&quot;: &quot;Project Loom virtual threads on the JIT; the JIT warms up, so the measured latency is a cold-vs-hot question&quot;,
+   &quot;rps_per_core&quot;: {
+    &quot;value&quot;: 489.1275,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;req/s/core&quot;
+   },
+   &quot;p50_ms&quot;: {
+    &quot;value&quot;: 0.262325,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;p99_ms&quot;: {
+    &quot;value&quot;: 2.6167905399999976,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;p999_ms&quot;: {
+    &quot;value&quot;: 4.203695968000019,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;ms&quot;
+   },
+   &quot;mem_mb&quot;: {
+    &quot;value&quot;: 191.9,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;MB&quot;
+   },
+   &quot;cpu_core&quot;: {
+    &quot;value&quot;: 0.705,
+    &quot;ci&quot;: null,
+    &quot;n&quot;: 1,
+    &quot;unit&quot;: &quot;core&quot;
+   },
+   &quot;ecosystem_friction&quot;: 3,
+   &quot;team_scaling&quot;: &quot;Deep enterprise ecosystem and massive hiring pool; Loom changes the concurrency model but Spring adds startup time and memory that the framework comparison must capture.&quot;,
+   &quot;notes&quot;: &quot;First-trial cold start is a real effect; Loom makes blocking JDBC cheap but the framework&#x27;s DI/reflection overhead is measured, not assumed.&quot;
+  }
+ ]
+}</pre>
+</details>
+
+<p class="foot">Generated by <code>bench/analysis/report.py</code>. Measured
+numbers are benchmark results; the ecosystem-friction and selection-guide
+content is editorial guidance derived from the repository's
+<code>bench/analysis/meta/frameworks.yaml</code>.</p>
+</body></html>

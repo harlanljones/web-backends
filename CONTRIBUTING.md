@@ -65,10 +65,17 @@ There is no single test command; the pieces are:
 
 - `python3 bench/conformance/run.py --url <app>` — the contract harness.
 - `python3 bench/analysis/aggregate.py --runs runs --json` — aggregation.
-- `bash -n bench/scripts/*.sh` — shell syntax.
+- `bash -n bench/scripts/*.sh` — shell syntax (CI also runs
+  `shellcheck -S warning`).
+- `python3 -m py_compile bench/analysis/*.py bench/seed/seed.py bench/conformance/run.py`
+  — Python syntax (CI also runs `ruff check --select E,F`).
 - Per-language check: `cargo build --release` (rust), `mvn -DskipTests
   package` (spring), `dotnet build` (aspnet) — all run inside the
   Dockerfile build.
+
+The analysis pipeline is exercised in CI against a synthetic fixture
+(`bench/analysis/testdata/`); a fixture run never produces a published
+number.
 
 ## Ticket workflow
 

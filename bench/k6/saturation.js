@@ -9,17 +9,15 @@
 //   k6 run bench/k6/saturation.js
 //   TARGET_RPS=10000 k6 run bench/k6/saturation.js
 
-import { stages, SATURATION_DURATION, TARGET_RPS, SATURATION_THRESHOLDS } from './lib/config.js';
+import { stages, startRate, SUMMARY_TREND_STATS, SATURATION_DURATION, TARGET_RPS, SATURATION_THRESHOLDS, WORKLOADS } from './lib/config.js';
 import {
-  jsonScenario, productReadScenario, orderWriteScenario, dashboardScenario,
+  buildScenarios,
   jsonWorkload, productReadWorkload, orderWriteWorkload, dashboardWorkload,
 } from './lib/endpoints.js';
 import { handleSummary } from './lib/output.js';
 
 const satStages = stages('saturation');
-console.log(`saturation: ${SATURATION_DURATION} at ${TARGET_RPS} RPS per workload`);
-
-const WORKLOADS = ['json', 'product_read', 'order_write', 'dashboard'];
+console.log(`saturation: ${SATURATION_DURATION} at ${TARGET_RPS} RPS (workloads: ${WORKLOADS.join(',')})`);
 
 // Per-workload thresholds. k6 threshold keys can include tag selectors
 // like {workload:json}, which is how we slice the per-scenario metrics.
@@ -29,14 +27,9 @@ for (const w of WORKLOADS) {
 }
 
 export const options = {
-  scenarios: Object.assign(
-    {},
-    jsonScenario(satStages),
-    productReadScenario(satStages),
-    orderWriteScenario(satStages),
-    dashboardScenario(satStages),
-  ),
+  scenarios: buildScenarios(satStages, WORKLOADS, startRate('saturation')),
   thresholds,
+  summaryTrendStats: SUMMARY_TREND_STATS,
 };
 
 export { handleSummary };

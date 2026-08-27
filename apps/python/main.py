@@ -441,6 +441,9 @@ async def get_metrics():
 def run() -> None:
     port = int(os.environ.get("PORT", "8080"))
     level = os.environ.get("LOG_LEVEL", "warn").lower()
+    # uvicorn spells the warning level "warning", while the contract uses
+    # "warn". Translate so the shared LOG_LEVEL env var works unchanged.
+    level = {"warn": "warning"}.get(level, level)
     # access_log is off so LOG_LEVEL=warn produces no per-request logging.
     uvicorn.run(app, host="0.0.0.0", port=port, log_level=level, access_log=False)
 

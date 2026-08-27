@@ -22,7 +22,7 @@ results from this mode are **not** publishable: the load generator competes with
 the application for CPU.
 
 ```bash
-just up            # or: bench/scripts/up.sh single
+./bench/scripts/up.sh
 ```
 
 ### `distributed` (measurement)

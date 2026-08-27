@@ -1,5 +1,9 @@
 # Modern Web Framework Performance & Scalability Benchmark
 
+[![CI](https://github.com/harlanljones/web-backends/actions/workflows/ci.yml/badge.svg)](https://github.com/harlanljones/web-backends/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Conformance](https://img.shields.io/badge/conformance-9%2F9-2ea44f)](bench/conformance/run.py)
+
 **An open, reproducible engineering reference** that compares modern
 backend web frameworks under a single, production-like workload.
 
@@ -97,6 +101,22 @@ measurement run you use `run-trial.sh` then `exec-trial.sh`.
 # Aggregated results with 95% confidence intervals
 python3 bench/analysis/aggregate.py --runs runs
 ```
+
+To scope a run to a subset of workloads — for example a read-only
+comparison that never mutates the seed — set `WORKLOADS`:
+
+```bash
+# json + product_read only
+WORKLOADS=json,product_read ./bench/scripts/exec-trial.sh read-go-trial-1
+```
+
+## Results
+
+Published reports live under [`docs/results/`](docs/results/). Read
+[`docs/results/README.md`](docs/results/README.md) before treating any number
+there as a measurement: a **bare-metal** report is a benchmark result, while a
+**single-host development run** is a labeled pipeline demonstration, not a
+publishable number. No report is ever generated from fabricated data.
 
 ## Interpreting the results
 

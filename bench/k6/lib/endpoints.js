@@ -170,3 +170,34 @@ export function dashboardWorkload() {
   });
   if (!ok) fail(`dashboard check failed status=${res.status}`);
 }
+
+// ---------------------------------------------------------------------------
+// Scenario composition
+// ---------------------------------------------------------------------------
+
+const SCENARIO_BUILDERS = {
+  json: jsonScenario,
+  product_read: productReadScenario,
+  order_write: orderWriteScenario,
+  dashboard: dashboardScenario,
+};
+
+// Build the k6 `scenarios` object for exactly the workloads in `workloads`
+// (a subset of the four names), each at the given arrival-rate `stages` and
+// initial `startRate`. Unknown names are ignored so a typo degrades to
+// "fewer workloads" rather than a k6 startup error.
+export function buildScenarios(stages, workloads, startRate) {
+  const out = {};
+  for (const w of workloads) {
+    const builder = SCENARIO_BUILDERS[w];
+    if (!builder) continue;
+    const built = builder(stages);
+    if (startRate !== undefined) {
+      for (const name of Object.keys(built)) {
+        built[name].startRate = startRate;
+      }
+    }
+    Object.assign(out, built);
+  }
+  return out;
+}

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Methodology questions
+    url: https://github.com/harlanljones/web-backends/discussions
+    about: Ask about the methodology or results; do not open an issue for questions.
+  - name: Security advisory
+    url: https://github.com/harlanljones/web-backends/security/advisories/new
+    about: Report a security vulnerability privately.

@@ -113,10 +113,14 @@ The report generator is complete. A real report is produced once real
 trials exist on a conforming testbed; do not generate a published report
 from fabricated numbers.
 
-## Currently shipping
+## Status
 
-This commit delivers the testbed topology (HJ-360), the database configuration
-and seed (HJ-361), the resource boundaries (HJ-362), and the observability
-stack (HJ-363). The four milestone leaves under HJ-356 are complete as a
-unit. The next ticket is HJ-364 (OpenAPI contract), which is already in this
-commit as `contracts/openapi.yaml`; HJ-365-367 will follow per-framework.
+Milestone 1 (infrastructure) and Milestone 2 (frameworks) are complete: the
+testbed topology, database, resource boundaries, observability, the shared
+OpenAPI contract, and all eight conformance-clean references are in the
+repository. Milestone 3 (execution) and Milestone 4 (analysis) are complete as
+code — the trial driver, campaign runner, k6 protocol, aggregation, comparison,
+and report generator all work. What remains is operator-side: running a
+conforming five-trial campaign on the bare-metal testbed and publishing the
+result. Until then the only published artifact is a labeled single-host
+development read benchmark under `docs/results/`.

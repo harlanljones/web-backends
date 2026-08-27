@@ -13,29 +13,24 @@
 //   k6 run bench/k6/warmup.js
 //   TARGET_RPS=10000 k6 run bench/k6/warmup.js
 
-import { stages, WARMUP_DURATION, TARGET_RPS, WARMUP_RPS_FRAC } from './lib/config.js';
+import { stages, startRate, SUMMARY_TREND_STATS, WARMUP_DURATION, TARGET_RPS, WARMUP_RPS_FRAC, WORKLOADS } from './lib/config.js';
 import {
-  jsonScenario, productReadScenario, orderWriteScenario, dashboardScenario,
+  buildScenarios,
   jsonWorkload, productReadWorkload, orderWriteWorkload, dashboardWorkload,
 } from './lib/endpoints.js';
 import { handleSummary } from './lib/output.js';
 
 const warmupStages = stages('warmup');
 const warmupRps = Math.round(TARGET_RPS * WARMUP_RPS_FRAC);
-console.log(`warmup: ${WARMUP_DURATION} at ${warmupRps} RPS per workload`);
+console.log(`warmup: ${WARMUP_DURATION} at ${warmupRps} RPS (workloads: ${WORKLOADS.join(',')})`);
 
 // No thresholds on warm-up: we are not measuring yet, and a framework
 // that runs out of headroom during warm-up is a finding we want to
 // record in the run manifest, not a failure of the k6 script.
 export const options = {
-  scenarios: Object.assign(
-    {},
-    jsonScenario(warmupStages),
-    productReadScenario(warmupStages),
-    orderWriteScenario(warmupStages),
-    dashboardScenario(warmupStages),
-  ),
+  scenarios: buildScenarios(warmupStages, WORKLOADS, startRate('warmup')),
   thresholds: {},
+  summaryTrendStats: SUMMARY_TREND_STATS,
 };
 
 export { handleSummary };

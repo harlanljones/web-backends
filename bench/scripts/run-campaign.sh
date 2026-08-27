@@ -64,7 +64,6 @@ docker ps --format '{{.Names}}' | grep -q '^bench-load$' || { echo "bench-load n
 if ! docker ps --format '{{.Names}}' | grep -q '^bench-app$'; then
   echo "bench-app not running; bringing up default framework"
   "$ROOT/bench/scripts/run-trial.sh" "$FRAMEWORK" --keep &
-  RUN_PID=$!
   # run-trial.sh blocks on sleep infinity after ready; we can't easily
   # wait for health here, so poll.
   for _ in $(seq 1 90); do
@@ -87,7 +86,6 @@ TOTAL=$((TRIALS + BURN_IN))
 echo "campaign: framework=$FRAMEWORK trials=$TRIALS burn_in=$BURN_IN label=$LABEL"
 echo
 
-campaign_status=0
 for ((i = 0; i < TOTAL; i++)); do
   if [ "$i" -lt "$BURN_IN" ]; then
     role="burnin"

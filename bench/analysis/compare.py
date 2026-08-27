@@ -111,11 +111,11 @@ def metric_display(agg: dict, key: str) -> dict:
          "results": {
             "workloads": [ {"workload": "json", "rps": {...},
                             "rps_per_core": {...}, "latency": {...}} ],
-            "resources": {"mem_mb": {...}, "cpu_part_of_one_core": {...}}
+            "resources": {"mem_mb": {...}, "cpu_cores": {...}}
          }}
     This is used for the framework-level `resources` metrics (mem/cpu).
     """
-    unit = {"mem_mb": "MB", "cpu_part_of_one_core": "core"}.get(key, "")
+    unit = {"mem_mb": "MB", "cpu_cores": "core"}.get(key, "")
     result = {"value": None, "ci": None, "unit": unit}
     res = (agg.get("results") or {}).get("resources", {})
     if key in res:
@@ -172,7 +172,7 @@ def compare_matrix(frameworks: list[str], aggregates: dict[str, dict],
             "p999_ms": metric_display_for_workload(agg, "json", "p999_ms"),
             # measured resources (app container)
             "mem_mb": metric_display(agg, "mem_mb"),
-            "cpu_core": metric_display(agg, "cpu_part_of_one_core"),
+            "cpu_core": metric_display(agg, "cpu_cores"),
             # qualitative
             "ecosystem_friction": q.get("ecosystem_friction"),
             "team_scaling": q.get("team_scaling") or "",

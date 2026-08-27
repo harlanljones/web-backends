@@ -173,13 +173,17 @@ def render_selguide() -> str:
             + "\n".join(rows) + "</tbody></table>")
 
 
-def render_report(compare: dict, meta: dict, out_dir: str) -> str:
+def render_report(compare: dict, meta: dict, out_dir: str, notice: Optional[str] = None) -> str:
     rows = compare.get("frameworks", [])
     today = date.today().isoformat()
 
     # Sort by RPS/core descending for the matrix, keep a copy in the
     # meta order for the deep dive.
     matrix_rows = sorted(rows, key=lambda r: (r["rps_per_core"].get("value") or 0), reverse=True)
+
+    banner = ""
+    if notice:
+        banner = (f'<div class="notice">{esc(notice)}</div>')
 
     body = f"""<!doctype html>
 <html><head><meta charset="utf-8">
@@ -192,6 +196,8 @@ body {{ font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
         line-height:1.55; }}
 h1 {{ font-size:1.8rem; margin-bottom:.2rem; }}
 .sub {{ color:var(--muted); margin-bottom:1.5rem; }}
+.notice {{ background:#fff7ed; border:1px solid #fdba74; border-left:4px solid #ea580c;
+        color:#7c2d12; padding:.75rem 1rem; margin:1rem 0 1.5rem; border-radius:4px; }}
 h2 {{ margin-top:2.5rem; border-bottom:2px solid var(--border); padding-bottom:.3rem; }}
 table {{ border-collapse:collapse; width:100%; margin:1rem 0 2rem; font-size:.92rem; }}
 th,td {{ padding:.5rem .6rem; border:1px solid var(--border); text-align:left; vertical-align:top; }}
@@ -210,6 +216,7 @@ dl.kv dt {{ font-weight:600; color:var(--muted); }}
 <p class="sub">Published <strong>{today}</strong>. Methodology and reproducible
 scripts live in the repository — see <code>docs/benchmark/</code> and
 <code>bench/</code>.</p>
+{banner}
 
 <h2>1. Decision matrix</h2>
 <p>Measured columns (RPS/core, p50/p99/p99.9, memory, CPU) come from the
@@ -268,6 +275,8 @@ def main() -> int:
     ap.add_argument("--meta", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "meta/frameworks.yaml"),
                     help="path to meta yaml")
     ap.add_argument("--out", default=None, help="output dir (default docs/results/<date>-bench)")
+    ap.add_argument("--notice", default=None,
+                    help="a caveat banner to render prominently at the top of the report")
     args = ap.parse_args()
 
     with open(args.compare) as f:
@@ -278,7 +287,7 @@ def main() -> int:
                                        "docs", "results", f"{date.today().isoformat()}-bench")
     out_dir = os.path.abspath(out_dir)
 
-    path = render_report(compare, meta, out_dir)
+    path = render_report(compare, meta, out_dir, notice=args.notice)
     print(f"wrote {path}")
     return 0
 

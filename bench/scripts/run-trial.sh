@@ -69,10 +69,6 @@ DOCKERFILE=$(awk -v fw="$FRAMEWORK" '
   $0 ~ "^[ \t]*- name: " fw "[ \t]*$" {found=1; next}
   found && /dockerfile:/ {gsub(/"/,"",$2); print $2; exit}
 ' "$ROOT/bench/frameworks.yaml")
-ENTRYPOINT=$(awk -v fw="$FRAMEWORK" '
-  $0 ~ "^[ \t]*- name: " fw "[ \t]*$" {found=1; next}
-  found && /entrypoint:/ {print; exit}
-' "$ROOT/bench/frameworks.yaml" | sed -E 's/^[[:space:]]*entrypoint:[[:space:]]*//; s/[[:space:]]*$//')
 
 echo "framework: $FRAMEWORK"
 echo "image:     $IMAGE"
@@ -98,6 +94,11 @@ fi
 [ -f "$ROOT/.env" ] || { echo "error: .env is missing" >&2; exit 2; }
 # shellcheck disable=SC1091
 set -a; . "$ROOT/.env"; set +a
+
+# Compose interpolates APP_IMAGE (declared `:?`) even for profiles that do
+# not include the app. Export a placeholder until the real image is chosen
+# below, so the non-app testbed can be reconciled first.
+export APP_IMAGE="${APP_IMAGE:-bench/none:latest}"
 
 echo "==> ensuring testbed is up (excluding app)"
 DOCKER_HOST_REAL="${DOCKER_HOST:-}"
